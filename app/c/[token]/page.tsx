@@ -93,18 +93,18 @@ export default function CallLobbyPage() {
             return;
         }
 
-        /*
-         * Phase 8:
-         *
-         * WebSocket signaling
-         * +
-         * WebRTC
-         *
-         * For now, navigate to the
-         * future call screen.
-         */
+        sessionStorage.setItem(
+            `miyor_guest_${invitation.room!.id}`,
+            JSON.stringify({
+                participantId:
+                    guest.participantId,
+                guestToken:
+                    guest.guestToken,
+            }),
+        );
+
         router.push(
-            `/call/${invitation.room!.id}`,
+            `/call/${invitation.room!.id}?guest=1`,
         );
     }
 
