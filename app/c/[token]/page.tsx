@@ -32,6 +32,7 @@ export default function CallLobbyPage() {
     const guest =
         useGuestJoin(
             invitation.room?.id ?? null,
+            token,
         );
 
     const media =

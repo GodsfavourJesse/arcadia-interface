@@ -30,10 +30,9 @@ export function AuthProvider({
     const [user, setUser] = useState<User | null>(null);
     const [loading, setLoading] = useState(true);
 
-    const refreshUser = useCallback(async () => {
+    const refreshUser = useCallback(async (): Promise<void> => {
         try {
-            const response =
-                await apiFetch<AuthResponse>("/me");
+            const response = await apiFetch<AuthResponse>("/me");
 
             setUser(response.user);
         } catch {
@@ -41,7 +40,7 @@ export function AuthProvider({
         }
     }, []);
 
-    const logout = useCallback(async () => {
+    const logout = useCallback(async (): Promise<void> => {
         try {
             await apiFetch<{ status: "ok" }>(
                 "/auth/logout",

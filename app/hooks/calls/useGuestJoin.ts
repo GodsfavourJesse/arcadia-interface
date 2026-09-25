@@ -6,21 +6,17 @@ import { joinRoomAsGuest } from "@/app/services/calls/participant.service";
 
 export function useGuestJoin(
     roomId: string | null,
+    invitationToken: string,
 ) {
-    const [displayName, setDisplayName] =
-        useState("");
+    const [displayName, setDisplayName] = useState("");
 
-    const [participantId, setParticipantId] =
-        useState<string | null>(null);
+    const [participantId, setParticipantId] = useState<string | null>(null);
 
-    const [guestToken, setGuestToken] =
-        useState<string | null>(null);
+    const [guestToken, setGuestToken] = useState<string | null>(null);
 
-    const [joining, setJoining] =
-        useState(false);
+    const [joining, setJoining] = useState(false);
 
-    const [error, setError] =
-        useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
 
     async function join() {
         if (!roomId || joining) {
@@ -39,11 +35,11 @@ export function useGuestJoin(
         setError(null);
 
         try {
-            const response =
-                await joinRoomAsGuest(
-                    roomId,
-                    name,
-                );
+            const response = await joinRoomAsGuest(
+                roomId,
+                invitationToken,
+                name,
+            );
 
             setParticipantId(
                 response.participant.id,

@@ -19,25 +19,42 @@ export async function apiFetch<T>(
     path: string,
     options: RequestInit = {},
 ): Promise<T> {
-    const headers = new Headers(options.headers);
+    const headers = new Headers(
+        options.headers,
+    );
 
-    if (options.body && !headers.has("Content-Type")) {
-        headers.set("Content-Type", "application/json");
+    if (
+        options.body &&
+        !headers.has("Content-Type")
+    ) {
+        headers.set(
+            "Content-Type",
+            "application/json",
+        );
     }
 
-    const response = await fetch(`${API_URL}${path}`, {
-        ...options,
-        credentials: "include",
-        headers,
-    });
+    const response = await fetch(
+        `${API_URL}${path}`,
+        {
+            ...options,
+            credentials: "include",
+            headers,
+            cache: "no-store",
+        },
+    );
 
-    const data = await response.json().catch(() => null);
+    const data =
+        await response.json().catch(
+            () => null,
+        );
 
     if (!response.ok) {
-        const error = data as ApiError | null;
+        const error =
+            data as ApiError | null;
 
         throw new ApiRequestError(
-            error?.message ?? `API request failed: ${response.status}`,
+            error?.message ??
+                `API request failed: ${response.status}`,
             response.status,
             error?.code,
         );
