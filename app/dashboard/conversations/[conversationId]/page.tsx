@@ -30,6 +30,7 @@ import {
 import type {
     ConversationDetails,
 } from "@/app/types/conversations/conversations.types";
+import { CallLauncher } from "@/app/components/calls/call-launcher";
 
 export default function ConversationPage() {
     const params =
@@ -193,7 +194,7 @@ export default function ConversationPage() {
                             .toUpperCase() ?? "?"}
                     </div>
 
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                         {isConversationLoading ? (
                             <p className="text-sm text-slate-500">
                                 Loading...
@@ -220,6 +221,34 @@ export default function ConversationPage() {
                             </>
                         )}
                     </div>
+
+                    {otherMember && (
+                        <div className="flex items-center gap-1">
+                            <CallLauncher
+                                conversationId={
+                                    conversationId
+                                }
+                                calleeId={
+                                    otherMember.userId
+                                }
+                                type="voice"
+                                compact
+                                label={`Call ${otherMember.user.displayName}`}
+                            />
+
+                            <CallLauncher
+                                conversationId={
+                                    conversationId
+                                }
+                                calleeId={
+                                    otherMember.userId
+                                }
+                                type="video"
+                                compact
+                                label={`Video call ${otherMember.user.displayName}`}
+                            />
+                        </div>
+                    )}
                 </header>
 
                 {conversationError && (

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "./providers/auth-provider";
+import { GlobalCallListener } from "./components/calls/global-call-listener";
 
 export const metadata: Metadata = {
     title: {
@@ -19,7 +20,11 @@ export default function RootLayout({
     return (
         <html lang="en">
             <body>
-                <AuthProvider>{children}</AuthProvider>
+                <AuthProvider>
+                    {children}
+
+                    <GlobalCallListener />
+                </AuthProvider>
             </body>
         </html>
     );
