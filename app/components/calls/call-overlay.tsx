@@ -174,6 +174,9 @@ function RemoteAudio({
             null,
         );
 
+    const [playbackBlocked, setPlaybackBlocked] =
+        useState(false);
+
     useEffect(() => {
         const audio = ref.current;
 
@@ -185,26 +188,70 @@ function RemoteAudio({
         audio.muted = !enabled;
         audio.volume = enabled ? 1 : 0;
 
-        if (stream && enabled) {
-            void audio.play().catch(() => {
-                /*
-                 * Browser autoplay rules may require the
-                 * receiver's Accept gesture.
-                 */
-            });
+        if (!stream || !enabled) {
+            setPlaybackBlocked(false);
+            return;
         }
+
+        setPlaybackBlocked(false);
+
+        void audio.play().then(
+            () => {
+                setPlaybackBlocked(false);
+            },
+            () => {
+                /*
+                 * Some browsers require an explicit user gesture before
+                 * remote audio may start. We expose a one-tap recovery
+                 * control rather than silently leaving the call muted.
+                 */
+                setPlaybackBlocked(true);
+            },
+        );
 
         return () => {
             audio.srcObject = null;
         };
     }, [stream, enabled]);
 
+    const enablePlayback = () => {
+        const audio = ref.current;
+
+        if (!audio || !stream || !enabled) {
+            return;
+        }
+
+        audio.muted = false;
+        audio.volume = 1;
+
+        void audio.play().then(
+            () => {
+                setPlaybackBlocked(false);
+            },
+            () => {
+                setPlaybackBlocked(true);
+            },
+        );
+    };
+
     return (
-        <audio
-            ref={ref}
-            autoPlay
-            playsInline
-        />
+        <>
+            <audio
+                ref={ref}
+                autoPlay
+                playsInline
+            />
+
+            {playbackBlocked && (
+                <button
+                    type="button"
+                    onClick={enablePlayback}
+                    className="pointer-events-auto fixed left-1/2 top-20 z-[130] -translate-x-1/2 rounded-full border border-white/15 bg-black/55 px-4 py-2.5 text-xs font-semibold text-white shadow-2xl backdrop-blur-xl transition hover:bg-black/70 active:scale-95"
+                >
+                    Tap to enable call audio
+                </button>
+            )}
+        </>
     );
 }
 

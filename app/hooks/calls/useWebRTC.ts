@@ -18,7 +18,6 @@ import {
 import type {
     RealtimeWebRTCEvent,
     RealtimeWebRTCClientEvent,
-    RealtimeMediaStateEvent,
 } from "@/app/types/realtime/realtime.types";
 
 import type {
@@ -1298,7 +1297,8 @@ export function useWebRTC({
         }
 
         const unsubscribe =
-            realtimeClient.subscribe(
+            realtimeClient.subscribeWebRTC(
+                callId,
                 (event) => {
                     if (
                         event.type !==
@@ -1324,15 +1324,12 @@ export function useWebRTC({
                         event.type ===
                         "MEDIA_STATE"
                     ) {
-                        const mediaEvent =
-                            event as RealtimeMediaStateEvent;
-
                         setRemoteAudioEnabled(
-                            mediaEvent.audioEnabled,
+                            event.audioEnabled,
                         );
 
                         setRemoteVideoEnabled(
-                            mediaEvent.videoEnabled,
+                            event.videoEnabled,
                         );
 
                         return;
