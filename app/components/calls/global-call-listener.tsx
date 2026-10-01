@@ -12,9 +12,6 @@ import {
     useCallsRealtime,
 } from "@/app/hooks/calls/useCallsRealtime";
 
-import type {
-    RealtimeServerEvent,
-} from "@/app/types/realtime/realtime.types";
 
 import {
     CallOverlay,
@@ -36,25 +33,11 @@ export function GlobalCallListener() {
                 state.applyRealtimeEvent,
         );
 
-    const handleEvent =
-        useCallback(
-            (
-                event: RealtimeServerEvent,
-            ) => {
-                applyRealtimeEvent(
-                    event as Parameters<
-                        typeof applyRealtimeEvent
-                    >[0],
-                );
-            },
-            [applyRealtimeEvent],
-        );
-
     useCallsRealtime({
         enabled:
             isHydrated &&
             Boolean(user),
-        onEvent: handleEvent,
+        onEvent: applyRealtimeEvent,
     });
 
     if (

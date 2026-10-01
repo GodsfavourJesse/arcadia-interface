@@ -7,6 +7,9 @@ import {
     createCall as createCallRequest,
     declineCall as declineCallRequest,
     endCall as endCallRequest,
+    failCall as failCallRequest,
+    getCall as getCallRequest,
+    listCalls as listCallsRequest,
 } from "@/app/services/calls.service";
 
 import { ApiRequestError } from "@/app/lib/client";
@@ -19,15 +22,23 @@ import {
 import type {
     Call,
     CallParticipant,
-    CallRealtimeEvent,
     CallType,
 } from "@/app/types/calls/calls.types";
+
+import type {
+    RealtimeServerEvent,
+} from "@/app/types/realtime/realtime.types";
+
+import {
+    isRealtimeCallEvent,
+} from "@/app/types/realtime/realtime.types";
 
 type CallStoreState = {
     activeCall: Call | null;
     participants: CallParticipant[];
 
     isStarting: boolean;
+    isHydrating: boolean;
     isActionPending: boolean;
 
     error: string | null;
@@ -38,20 +49,20 @@ type CallStoreState = {
         type: CallType;
     }) => Promise<void>;
 
+    hydrateActiveCall: () => Promise<void>;
+
     accept: () => Promise<void>;
     decline: () => Promise<void>;
     cancel: () => Promise<void>;
-
     markConnected: () => Promise<void>;
-
+    fail: () => Promise<void>;
     end: () => Promise<void>;
 
     applyRealtimeEvent: (
-        event: CallRealtimeEvent,
+        event: RealtimeServerEvent,
     ) => void;
 
     clearError: () => void;
-
     reset: () => void;
 };
 
@@ -69,8 +80,8 @@ function errorMessage(
     return fallback;
 }
 
-async function runAction(
-    action: () => Promise<unknown>,
+async function runAction<T>(
+    action: () => Promise<T>,
     set: (
         partial:
             | Partial<CallStoreState>
@@ -79,6 +90,7 @@ async function runAction(
               ) => Partial<CallStoreState>),
     ) => void,
     fallback: string,
+    onSuccess?: (result: T) => void,
 ) {
     set({
         isActionPending: true,
@@ -86,7 +98,8 @@ async function runAction(
     });
 
     try {
-        await action();
+        const result = await action();
+        onSuccess?.(result);
     } catch (error) {
         set({
             error: errorMessage(
@@ -105,13 +118,10 @@ export const useCallStore =
     create<CallStoreState>(
         (set, get) => ({
             activeCall: null,
-
             participants: [],
-
             isStarting: false,
-
+            isHydrating: false,
             isActionPending: false,
-
             error: null,
 
             startCall: async (input) => {
@@ -128,7 +138,6 @@ export const useCallStore =
                         error:
                             "You are already in a call.",
                     });
-
                     return;
                 }
 
@@ -146,33 +155,32 @@ export const useCallStore =
                     const returnedCall =
                         response.data;
 
-                    /*
-                     * CALL_CREATED/CALL_RINGING may
-                     * arrive before the REST response.
-                     */
-                    const realtimeCall =
+                    const currentRealtimeCall =
                         get().activeCall;
 
                     if (
-                        realtimeCall?.id ===
+                        currentRealtimeCall?.id ===
                             returnedCall.id &&
-                        get().participants
-                            .length > 0
+                        get().participants.length > 0
                     ) {
                         set({
                             activeCall:
-                                realtimeCall,
+                                currentRealtimeCall,
                             isStarting: false,
                         });
-
                         return;
                     }
 
+                    const hydrated =
+                        await getCallRequest(
+                            returnedCall.id,
+                        );
+
                     set({
                         activeCall:
-                            returnedCall,
+                            hydrated.data.call,
                         participants:
-                            get()
+                            hydrated.data
                                 .participants,
                         isStarting: false,
                     });
@@ -187,28 +195,109 @@ export const useCallStore =
                 }
             },
 
+            hydrateActiveCall: async () => {
+                if (get().isHydrating) {
+                    return;
+                }
+
+                set({
+                    isHydrating: true,
+                });
+
+                try {
+                    const response =
+                        await listCallsRequest(20);
+
+                    const active =
+                        response.data.find(
+                            (item) =>
+                                !TERMINAL_CALL_STATES.has(
+                                    item.call.state,
+                                ),
+                        );
+
+                    if (!active) {
+                        /*
+                         * Read activeCall once so TypeScript can
+                         * safely narrow the value.
+                         */
+                        const current =
+                            get().activeCall;
+
+                        if (
+                            !current ||
+                            TERMINAL_CALL_STATES.has(
+                                current.state,
+                            )
+                        ) {
+                            set({
+                                activeCall: null,
+                                participants: [],
+                            });
+                        }
+
+                        return;
+                    }
+
+                    const details =
+                        await getCallRequest(
+                            active.call.id,
+                        );
+
+                    set({
+                        activeCall:
+                            details.data.call,
+                        participants:
+                            details.data
+                                .participants,
+                        error: null,
+                    });
+                } catch (error) {
+                    /*
+                     * A reconnecting realtime socket should not
+                     * turn into a visible UI error merely because
+                     * the reconciliation request failed.
+                     */
+                    console.warn(
+                        "[Calls] Active-call reconciliation failed:",
+                        error,
+                    );
+                } finally {
+                    set({
+                        isHydrating: false,
+                    });
+                }
+            },
+
             accept: async () => {
                 const call =
                     get().activeCall;
 
-                if (!call) {
-                    return;
-                }
-
                 if (
-                    call.state !==
-                    CALL_STATE.RINGING
+                    !call ||
+                    call.state !== CALL_STATE.RINGING
                 ) {
                     return;
                 }
 
                 await runAction(
-                    () =>
-                        acceptCallRequest(
-                            call.id,
-                        ),
+                    async () => {
+                        const response =
+                            await acceptCallRequest(
+                                call.id,
+                            );
+
+                        return response.data;
+                    },
                     set,
                     "Unable to accept the call.",
+                    (updatedCall) => {
+                        set({
+                            activeCall:
+                                updatedCall,
+                            error: null,
+                        });
+                    },
                 );
             },
 
@@ -221,12 +310,22 @@ export const useCallStore =
                 }
 
                 await runAction(
-                    () =>
-                        declineCallRequest(
-                            callId,
-                        ),
+                    async () => {
+                        const response =
+                            await declineCallRequest(
+                                callId,
+                            );
+
+                        return response.data;
+                    },
                     set,
                     "Unable to decline the call.",
+                    (updatedCall) => {
+                        set({
+                            activeCall:
+                                updatedCall,
+                        });
+                    },
                 );
             },
 
@@ -239,52 +338,87 @@ export const useCallStore =
                 }
 
                 await runAction(
-                    () =>
-                        cancelCallRequest(
-                            callId,
-                        ),
+                    async () => {
+                        const response =
+                            await cancelCallRequest(
+                                callId,
+                            );
+
+                        return response.data;
+                    },
                     set,
                     "Unable to cancel the call.",
+                    (updatedCall) => {
+                        set({
+                            activeCall:
+                                updatedCall,
+                        });
+                    },
                 );
             },
 
-            /*
-             * IMPORTANT:
-             *
-             * This method is ONLY called by
-             * useWebRTC.onConnected().
-             *
-             * No button calls this anymore.
-             */
             markConnected: async () => {
                 const call =
                     get().activeCall;
 
-                if (!call) {
-                    return;
-                }
-
                 if (
-                    call.state ===
-                    CALL_STATE.CONNECTED
-                ) {
-                    return;
-                }
-
-                if (
-                    call.state !==
-                    CALL_STATE.ACCEPTED
+                    !call ||
+                    call.state === CALL_STATE.CONNECTED ||
+                    call.state !== CALL_STATE.ACCEPTED
                 ) {
                     return;
                 }
 
                 await runAction(
-                    () =>
-                        connectCallRequest(
-                            call.id,
-                        ),
+                    async () => {
+                        const response =
+                            await connectCallRequest(
+                                call.id,
+                            );
+
+                        return response.data;
+                    },
                     set,
                     "Unable to connect the call.",
+                    (updatedCall) => {
+                        if (
+                            get().activeCall?.id ===
+                            updatedCall.id
+                        ) {
+                            set({
+                                activeCall:
+                                    updatedCall,
+                            });
+                        }
+                    },
+                );
+            },
+
+            fail: async () => {
+                const callId =
+                    get().activeCall?.id;
+
+                if (!callId) {
+                    return;
+                }
+
+                await runAction(
+                    async () => {
+                        const response =
+                            await failCallRequest(
+                                callId,
+                            );
+
+                        return response.data;
+                    },
+                    set,
+                    "The call could not be connected.",
+                    (updatedCall) => {
+                        set({
+                            activeCall:
+                                updatedCall,
+                        });
+                    },
                 );
             },
 
@@ -297,22 +431,30 @@ export const useCallStore =
                 }
 
                 await runAction(
-                    () =>
-                        endCallRequest(
-                            callId,
-                        ),
+                    async () => {
+                        const response =
+                            await endCallRequest(
+                                callId,
+                            );
+
+                        return response.data;
+                    },
                     set,
                     "Unable to end the call.",
+                    (updatedCall) => {
+                        set({
+                            activeCall:
+                                updatedCall,
+                        });
+                    },
                 );
             },
 
             applyRealtimeEvent: (event) => {
                 if (
-                    event.type ===
-                        "CONNECTED" ||
-                    event.type ===
-                        "PONG" ||
-                    event.type === "ERROR"
+                    !isRealtimeCallEvent(
+                        event,
+                    )
                 ) {
                     return;
                 }
@@ -321,13 +463,13 @@ export const useCallStore =
                     get().activeCall;
 
                 /*
-                 * Do not replace an active call with
-                 * an unrelated call.
+                 * A second unrelated call must never replace an
+                 * active call. Terminal calls are allowed to be
+                 * replaced by a newer call.
                  */
                 if (
                     current &&
-                    current.id !==
-                        event.call.id &&
+                    current.id !== event.call.id &&
                     !TERMINAL_CALL_STATES.has(
                         current.state,
                     )
@@ -338,13 +480,11 @@ export const useCallStore =
                 set({
                     activeCall:
                         event.call,
-
                     participants:
                         event.participants,
-
                     isStarting: false,
-
                     isActionPending: false,
+                    error: null,
                 });
             },
 
@@ -358,6 +498,7 @@ export const useCallStore =
                     activeCall: null,
                     participants: [],
                     isStarting: false,
+                    isHydrating: false,
                     isActionPending: false,
                     error: null,
                 });

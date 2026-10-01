@@ -106,23 +106,13 @@ export type GetCallResponse = SuccessEnvelope<CallWithParticipants>;
 export type GetCallEventsResponse = SuccessEnvelope<CallEvent[]>;
 export type CallActionResponse = SuccessEnvelope<Call>;
 
-export type CallWebSocketLifecycleEvent =
-    | "CALL_CREATED"
-    | "CALL_RINGING"
-    | "CALL_ACCEPTED"
-    | "CALL_DECLINED"
-    | "CALL_CANCELLED"
-    | "CALL_CONNECTED"
-    | "CALL_ENDED"
-    | "CALL_FAILED";
+export type IceServerConfig = {
+    urls: string;
+    username?: string;
+    credential?: string;
+};
 
-export type CallRealtimeEvent =
-    | { type: "CONNECTED"; userId: string }
-    | { type: "PONG" }
-    | {
-          type: CallWebSocketLifecycleEvent;
-          call: Call;
-          participants: CallParticipant[];
-          actorUserId: string | null;
-      }
-    | { type: "ERROR"; code: string; message: string };
+export type IceConfigResponse = SuccessEnvelope<{
+    iceServers: IceServerConfig[];
+}>;
+

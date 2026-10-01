@@ -182,10 +182,7 @@ export function OutgoingCallModal() {
                 )}
 
                 <p className="mt-4 text-sm text-white/60">
-                    {activeCall.state ===
-                    "initiating"
-                        ? "Starting call…"
-                        : "Ringing…"}
+                    Calling…
                 </p>
 
                 <button

@@ -6,8 +6,6 @@ import {
     useState,
 } from "react";
 
-import { useRouter } from "next/navigation";
-
 import {
     getConversation,
 } from "@/app/services/conversations.service";
@@ -21,6 +19,10 @@ import {
 } from "@/app/hooks/calls/useWebRTC";
 
 import {
+    useCallRingtone,
+} from "@/app/hooks/calls/useCallRingtone";
+
+import {
     useCallStore,
 } from "@/app/store/calls/call.store";
 
@@ -32,10 +34,6 @@ import {
 import {
     CallControls,
 } from "./call-controls";
-
-import {
-    CallStatus,
-} from "./call-status";
 
 import {
     IncomingCallModal,
@@ -71,12 +69,10 @@ function Avatar({
 
     const sizeClass =
         size === "small"
-            ? "h-20 w-20 text-2xl"
+            ? "h-16 w-16 text-xl"
             : "h-28 w-28 text-3xl";
 
-    if (
-        profile.profilePictureUrl
-    ) {
+    if (profile.profilePictureUrl) {
         return (
             <img
                 src={
@@ -115,59 +111,22 @@ function formatDuration(
     return `${minutes}:${seconds}`;
 }
 
-function LocalVideo({
+function VideoSurface({
     stream,
+    muted = false,
+    className,
 }: {
     stream: MediaStream | null;
+    muted?: boolean;
+    className: string;
 }) {
-    const videoRef =
+    const ref =
         useRef<HTMLVideoElement | null>(
             null,
         );
 
     useEffect(() => {
-        const video =
-            videoRef.current;
-
-        if (!video) {
-            return;
-        }
-
-        video.srcObject = stream;
-
-        return () => {
-            video.srcObject = null;
-        };
-    }, [stream]);
-
-    if (!stream) {
-        return null;
-    }
-
-    return (
-        <video
-            ref={videoRef}
-            autoPlay
-            muted
-            playsInline
-            className="h-full w-full object-cover"
-        />
-    );
-}
-
-function RemoteVideo({
-    stream,
-}: {
-    stream: MediaStream | null;
-}) {
-    const videoRef =
-        useRef<HTMLVideoElement | null>(
-            null,
-        );
-
-    useEffect(() => {
-        const video =
-            videoRef.current;
+        const video = ref.current;
 
         if (!video) {
             return;
@@ -176,22 +135,29 @@ function RemoteVideo({
         video.srcObject = stream;
 
         if (stream) {
-            void video.play().catch(
-                () => undefined,
-            );
+            video.muted = muted;
+            video.volume = muted ? 0 : 1;
+
+            void video.play().catch(() => {
+                /*
+                 * The receiver's Accept action is a user gesture,
+                 * but some browsers may still defer media playback.
+                 */
+            });
         }
 
         return () => {
             video.srcObject = null;
         };
-    }, [stream]);
+    }, [stream, muted]);
 
     return (
         <video
-            ref={videoRef}
+            ref={ref}
             autoPlay
             playsInline
-            className="h-full w-full object-cover"
+            muted={muted}
+            className={className}
         />
     );
 }
@@ -201,25 +167,29 @@ function RemoteAudio({
 }: {
     stream: MediaStream | null;
 }) {
-    const audioRef =
+    const ref =
         useRef<HTMLAudioElement | null>(
             null,
         );
 
     useEffect(() => {
-        const audio =
-            audioRef.current;
+        const audio = ref.current;
 
         if (!audio) {
             return;
         }
 
         audio.srcObject = stream;
+        audio.muted = false;
+        audio.volume = 1;
 
         if (stream) {
-            void audio.play().catch(
-                () => undefined,
-            );
+            void audio.play().catch(() => {
+                /*
+                 * Browser autoplay rules may require the
+                 * receiver's Accept gesture.
+                 */
+            });
         }
 
         return () => {
@@ -229,8 +199,9 @@ function RemoteAudio({
 
     return (
         <audio
-            ref={audioRef}
+            ref={ref}
             autoPlay
+            playsInline
         />
     );
 }
@@ -238,80 +209,44 @@ function RemoteAudio({
 function EndedCallView({
     profile,
     type,
-    onBack,
+    failed,
 }: {
     profile: Profile;
     type: string;
-    onBack: () => void;
+    failed: boolean;
 }) {
     return (
-        <div className="fixed inset-0 z-[100] flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
+        <div className="fixed inset-0 z-[120] flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
             <div className="flex w-full max-w-md flex-col items-center text-center">
                 <Avatar
                     profile={profile}
                     size="large"
                 />
 
-                <p className="mt-7 text-xs font-medium uppercase tracking-[0.2em] text-white/40">
+                <p className="mt-7 text-xs font-medium uppercase tracking-[0.22em] text-white/40">
                     Miyor
                 </p>
 
                 <h1 className="mt-3 text-3xl font-semibold tracking-tight">
-                    Call ended
+                    {failed
+                        ? "Call couldn’t connect"
+                        : "Call ended"}
                 </h1>
 
                 <p className="mt-2 text-sm text-white/50">
-                    Your{" "}
-                    {type ===
-                    CALL_TYPE.VIDEO
-                        ? "video"
-                        : "voice"}{" "}
-                    call with{" "}
-                    {
-                        profile.displayName
-                    }{" "}
-                    has ended.
+                    {failed
+                        ? "Please check your microphone, camera, or network and try again."
+                        : `${type === CALL_TYPE.VIDEO ? "Video" : "Voice"} call with ${profile.displayName}`}
                 </p>
-
-                <button
-                    type="button"
-                    onClick={onBack}
-                    className="mt-8 flex h-14 w-14 items-center justify-center rounded-full bg-white text-slate-950 transition hover:bg-white/90"
-                    aria-label="Return to previous page"
-                >
-                    <svg
-                        className="h-6 w-6"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                    >
-                        <path
-                            d="M6 6l12 12M18 6 6 18"
-                            strokeLinecap="round"
-                        />
-                    </svg>
-                </button>
-
-                <button
-                    type="button"
-                    onClick={onBack}
-                    className="mt-4 text-sm text-white/50 transition hover:text-white"
-                >
-                    Back
-                </button>
             </div>
         </div>
     );
 }
 
 export function CallOverlay() {
-    const router = useRouter();
-
     const {
         activeCall,
         myParticipant,
-        otherParticipant,
         isIncoming,
         isOutgoing,
         isAccepted,
@@ -343,13 +278,17 @@ export function CallOverlay() {
 
     const clearError =
         useCallStore(
-            (state) =>
-                state.clearError,
+            (state) => state.clearError,
         );
 
     const reset =
         useCallStore(
             (state) => state.reset,
+        );
+
+    const fail =
+        useCallStore(
+            (state) => state.fail,
         );
 
     const [profile, setProfile] =
@@ -361,15 +300,14 @@ export function CallOverlay() {
     const [elapsed, setElapsed] =
         useState(0);
 
+    const enabled =
+        Boolean(activeCall) &&
+        !isTerminal &&
+        (isAccepted || isConnected);
+
     const {
         localStream,
         remoteStream,
-        connectionState:
-            webRTCConnectionState,
-        isConnected:
-            isWebRTCConnected,
-        isConnecting:
-            isWebRTCConnecting,
         isMuted,
         isCameraEnabled,
         toggleMute,
@@ -377,42 +315,29 @@ export function CallOverlay() {
     } = useWebRTC({
         callId:
             activeCall?.id ?? null,
-
         callType:
             activeCall?.type ?? null,
-
         isCaller:
             myParticipant?.role ===
             "caller",
-
-        /*
-         * This is the key transition.
-         *
-         * As soon as the call becomes ACCEPTED,
-         * both sides' WebRTC hooks become active.
-         */
-        enabled:
-            Boolean(activeCall) &&
-            isAccepted &&
-            !isTerminal,
-
-        /*
-         * ONLY actual RTCPeerConnection
-         * connectivity can call this.
-         */
+        enabled,
         onConnected: () => {
             void useCallStore
                 .getState()
                 .markConnected();
         },
-
         onFailed: () => {
-            /*
-             * WebRTC failure does not pretend
-             * the call is connected.
-             */
+            void fail();
         },
     });
+
+    const isRinging =
+        Boolean(activeCall) &&
+        isIncoming &&
+        activeCall?.state ===
+            CALL_STATE.RINGING;
+
+    useCallRingtone(isRinging);
 
     useEffect(() => {
         if (!activeCall) {
@@ -431,35 +356,33 @@ export function CallOverlay() {
                         call.conversationId,
                     );
 
-                const member =
+                const otherMember =
                     response.conversation.members.find(
-                        (item) =>
-                            item.userId ===
-                            otherParticipant?.userId,
+                        (member) =>
+                            member.userId !==
+                            myParticipant?.userId,
                     );
 
                 if (
                     !cancelled &&
-                    member
+                    otherMember
                 ) {
                     setProfile({
                         displayName:
-                            member.user
+                            otherMember.user
                                 .displayName ||
                             "Miyor user",
-
                         username:
-                            member.user
+                            otherMember.user
                                 .username,
-
                         profilePictureUrl:
-                            member.user
+                            otherMember.user
                                 .profilePictureUrl ??
                             null,
                     });
                 }
             } catch {
-                // Keep fallback profile.
+                // Keep the fallback profile.
             }
         }
 
@@ -470,7 +393,8 @@ export function CallOverlay() {
         };
     }, [
         activeCall?.conversationId,
-        otherParticipant?.userId,
+        activeCall?.id,
+        myParticipant?.userId,
     ]);
 
     useEffect(() => {
@@ -536,28 +460,38 @@ export function CallOverlay() {
         clearError,
     ]);
 
-    /*
-     * Nothing to render if there is no call.
-     */
+    useEffect(() => {
+        if (!isTerminal) {
+            return;
+        }
+
+        const timer =
+            window.setTimeout(
+                () => {
+                    reset();
+                },
+                1400,
+            );
+
+        return () =>
+            window.clearTimeout(
+                timer,
+            );
+    }, [isTerminal, reset]);
+
     if (!activeCall) {
         return null;
     }
 
-    /*
-     * TERMINAL STATE:
-     *
-     * Both caller and callee receive CALL_ENDED.
-     * Both remain on this screen until Back/X.
-     */
     if (isTerminal) {
         return (
             <EndedCallView
                 profile={profile}
                 type={activeCall.type}
-                onBack={() => {
-                    reset();
-                    router.back();
-                }}
+                failed={
+                    activeCall.state ===
+                    CALL_STATE.FAILED
+                }
             />
         );
     }
@@ -578,57 +512,52 @@ export function CallOverlay() {
         activeCall.type ===
         CALL_TYPE.VIDEO;
 
-    const hasRemoteMedia =
-        Boolean(
-            remoteStream &&
-                remoteStream.getTracks()
-                    .length > 0,
-        );
-
-    const showRemoteVideo =
+    const hasRemoteVideo =
         isVideo &&
-        hasRemoteMedia;
+        Boolean(
+            remoteStream?.getVideoTracks()
+                .length,
+        );
 
     return (
         <div className="fixed inset-0 z-[100] overflow-hidden bg-slate-950 text-white">
-            <div className="absolute inset-0 overflow-hidden bg-slate-950">
-                {showRemoteVideo ? (
-                    <RemoteVideo
+            <div className="absolute inset-0">
+                {hasRemoteVideo ? (
+                    <VideoSurface
                         stream={
                             remoteStream
                         }
+                        className="h-full w-full object-cover"
                     />
                 ) : (
-                    <div className="absolute inset-0 flex items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.10),transparent_40%),linear-gradient(180deg,#111827,#020617)]">
-                        <div className="flex flex-col items-center">
-                            <Avatar
-                                profile={
-                                    profile
-                                }
-                                size="large"
-                            />
+                    <div className="absolute inset-0 flex items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_50%_28%,rgba(99,102,241,0.20),transparent_34%),radial-gradient(circle_at_50%_70%,rgba(14,165,233,0.12),transparent_38%),#020617]">
+                        <div className="absolute h-72 w-72 animate-pulse rounded-full bg-white/[0.025] blur-3xl" />
 
-                            <p className="mt-6 text-sm text-white/55">
-                                {webRTCConnectionState ===
-                                "requesting-media"
-                                    ? "Requesting microphone and camera..."
-                                    : isWebRTCConnecting
-                                      ? "Connecting..."
-                                      : isWebRTCConnected
-                                        ? "Connected"
-                                        : "Waiting for media..."}
-                            </p>
+                        <div className="relative flex flex-col items-center">
+                            <div className="rounded-full p-2 ring-1 ring-white/10">
+                                <Avatar
+                                    profile={
+                                        profile
+                                    }
+                                />
+                            </div>
+
+                            <div className="mt-7 h-1.5 w-20 overflow-hidden rounded-full bg-white/10">
+                                <div className="h-full w-1/2 animate-[pulse_1.2s_ease-in-out_infinite] rounded-full bg-white/40" />
+                            </div>
                         </div>
                     </div>
                 )}
 
                 {isVideo &&
                     localStream && (
-                        <div className="absolute right-4 top-4 h-40 w-28 overflow-hidden rounded-2xl border border-white/15 bg-black shadow-2xl sm:right-6 sm:top-6 sm:h-48 sm:w-36">
-                            <LocalVideo
+                        <div className="absolute right-4 top-4 h-36 w-28 overflow-hidden rounded-2xl border border-white/20 bg-slate-900 shadow-2xl shadow-black/40 sm:right-6 sm:top-6 sm:h-48 sm:w-36">
+                            <VideoSurface
                                 stream={
                                     localStream
                                 }
+                                muted
+                                className="h-full w-full object-cover"
                             />
 
                             {!isCameraEnabled && (
@@ -643,9 +572,9 @@ export function CallOverlay() {
                                 </div>
                             )}
 
-                            <div className="absolute bottom-2 left-2 rounded-full bg-black/50 px-2 py-1 text-[10px] text-white/70 backdrop-blur">
+                            <span className="absolute bottom-2 left-2 rounded-full bg-black/50 px-2.5 py-1 text-[10px] font-medium text-white/75 backdrop-blur">
                                 You
-                            </div>
+                            </span>
                         </div>
                     )}
 
@@ -657,25 +586,29 @@ export function CallOverlay() {
                     />
                 )}
 
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/50" />
+                <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/45 via-transparent to-black/70" />
             </div>
 
             <div className="relative flex min-h-screen flex-col">
                 <header className="flex items-center justify-between px-5 py-5 sm:px-8">
                     <div>
-                        <p className="text-xs font-medium uppercase tracking-[0.2em] text-white/45">
-                            Miyor
-                        </p>
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold uppercase tracking-[0.22em] text-white/55">
+                                Miyor
+                            </span>
 
-                        <p className="mt-1 text-sm text-white/70">
-                            {isVideo
-                                ? "Video call"
-                                : "Voice call"}
-                        </p>
+                            <span className="h-1 w-1 rounded-full bg-white/30" />
+
+                            <span className="text-xs text-white/45">
+                                {isVideo
+                                    ? "Video"
+                                    : "Voice"}
+                            </span>
+                        </div>
                     </div>
 
                     {isConnected && (
-                        <div className="rounded-full bg-black/30 px-3 py-1.5 text-sm tabular-nums backdrop-blur">
+                        <div className="rounded-full border border-white/10 bg-black/30 px-3.5 py-2 text-sm font-medium tabular-nums text-white/85 backdrop-blur-xl">
                             {formatDuration(
                                 elapsed,
                             )}
@@ -683,90 +616,38 @@ export function CallOverlay() {
                     )}
                 </header>
 
-                <main className="flex flex-1 flex-col items-center justify-center px-5 pb-10">
-                    <div className="flex w-full max-w-md flex-col items-center text-center">
-                        {!showRemoteVideo && (
-                            <Avatar
-                                profile={
-                                    profile
-                                }
-                                size="large"
-                            />
-                        )}
-
-                        <h1 className="mt-7 text-2xl font-semibold tracking-tight sm:text-3xl">
-                            {
-                                profile.displayName
-                            }
-                        </h1>
-
-                        {profile.username && (
-                            <p className="mt-1 text-sm text-white/45">
-                                @
+                <main className="flex flex-1 items-center justify-center px-6 pb-24">
+                    {!hasRemoteVideo && (
+                        <div className="flex flex-col items-center text-center">
+                            <h1 className="mt-7 text-2xl font-semibold tracking-tight sm:text-3xl">
                                 {
-                                    profile.username
+                                    profile.displayName
                                 }
-                            </p>
-                        )}
+                            </h1>
 
-                        <div className="mt-3">
-                            <CallStatus
-                                state={
-                                    activeCall.state
-                                }
-                                type={
-                                    activeCall.type
-                                }
-                            />
-                        </div>
-
-                        {isAccepted &&
-                            !isConnected && (
-                                <div className="mt-5 flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-white/60 backdrop-blur">
-                                    <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" />
-
-                                    {webRTCConnectionState ===
-                                    "requesting-media"
-                                        ? "Requesting microphone and camera..."
-                                        : isWebRTCConnecting
-                                          ? "Connecting media..."
-                                          : "Preparing call..."}
-                                </div>
+                            {profile.username && (
+                                <p className="mt-1 text-sm text-white/45">
+                                    @
+                                    {
+                                        profile.username
+                                    }
+                                </p>
                             )}
-
-                        {isConnected && (
-                            <p className="mt-2 text-xs text-white/45">
-                                {isVideo
-                                    ? "Video connected"
-                                    : "Voice connected"}
-                            </p>
-                        )}
-
-                        {error && (
-                            <button
-                                type="button"
-                                onClick={
-                                    clearError
-                                }
-                                className="mt-5 rounded-xl border border-red-300/20 bg-red-500/10 px-4 py-3 text-left text-xs text-red-200"
-                            >
-                                {error}
-                            </button>
-                        )}
-                    </div>
+                        </div>
+                    )}
                 </main>
 
                 <footer className="px-5 pb-8 sm:px-8">
-                    {isConnected && (
+                    {localStream && (
                         <div className="mb-5 flex items-center justify-center gap-3">
                             <button
                                 type="button"
                                 onClick={
                                     toggleMute
                                 }
-                                className={`flex h-12 w-12 items-center justify-center rounded-full border transition ${
+                                className={`flex h-12 w-12 items-center justify-center rounded-full border backdrop-blur-xl transition ${
                                     isMuted
-                                        ? "border-red-400/30 bg-red-500/20 text-red-200"
+                                        ? "border-red-300/30 bg-red-500/25 text-red-100"
                                         : "border-white/10 bg-white/10 text-white hover:bg-white/15"
                                 }`}
                                 aria-label={
@@ -775,9 +656,14 @@ export function CallOverlay() {
                                         : "Mute microphone"
                                 }
                             >
-                                {isMuted
-                                    ? "🔇"
-                                    : "🎙️"}
+                                <span
+                                    aria-hidden="true"
+                                    className="text-lg"
+                                >
+                                    {isMuted
+                                        ? "🔇"
+                                        : "🎙️"}
+                                </span>
                             </button>
 
                             {isVideo && (
@@ -786,9 +672,9 @@ export function CallOverlay() {
                                     onClick={
                                         toggleCamera
                                     }
-                                    className={`flex h-12 w-12 items-center justify-center rounded-full border transition ${
+                                    className={`flex h-12 w-12 items-center justify-center rounded-full border backdrop-blur-xl transition ${
                                         !isCameraEnabled
-                                            ? "border-red-400/30 bg-red-500/20 text-red-200"
+                                            ? "border-red-300/30 bg-red-500/25 text-red-100"
                                             : "border-white/10 bg-white/10 text-white hover:bg-white/15"
                                     }`}
                                     aria-label={
@@ -797,9 +683,14 @@ export function CallOverlay() {
                                             : "Turn camera on"
                                     }
                                 >
-                                    {isCameraEnabled
-                                        ? "📹"
-                                        : "🚫"}
+                                    <span
+                                        aria-hidden="true"
+                                        className="text-lg"
+                                    >
+                                        {isCameraEnabled
+                                            ? "📹"
+                                            : "🚫"}
+                                    </span>
                                 </button>
                             )}
                         </div>
@@ -836,6 +727,18 @@ export function CallOverlay() {
                             void end()
                         }
                     />
+
+                    {error && (
+                        <button
+                            type="button"
+                            onClick={
+                                clearError
+                            }
+                            className="mx-auto mt-4 block max-w-md rounded-xl border border-red-300/20 bg-red-500/10 px-4 py-3 text-left text-xs text-red-100 backdrop-blur-xl"
+                        >
+                            {error}
+                        </button>
+                    )}
                 </footer>
             </div>
         </div>

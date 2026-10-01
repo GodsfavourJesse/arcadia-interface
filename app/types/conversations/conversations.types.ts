@@ -103,33 +103,3 @@ export type MarkConversationReadResponse = {
     readAt: string | null;
     messageIds: string[];
 };
-
-export type ConversationSocketEvent =
-    | {
-          type: "CONNECTED";
-          userId: string;
-      }
-    | {
-          type: "SUBSCRIBED";
-          conversationId: string;
-      }
-    | {
-          type: "UNSUBSCRIBED";
-          conversationId: string;
-      }
-    | {
-          type: "MESSAGE_NEW";
-          message: Message;
-      }
-    | {
-          type: "MESSAGE_READ";
-          conversationId: string;
-          readerId: string;
-          messageIds: string[];
-          readAt: string;
-      }
-    | {
-          type: "ERROR";
-          code: string;
-          message: string;
-      };

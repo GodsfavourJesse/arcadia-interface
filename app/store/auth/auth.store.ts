@@ -20,6 +20,7 @@ import type {
     User,
 } from "../../types/auth/auth.types";
 import { ApiRequestError } from "@/app/lib/client";
+import { realtimeClient } from "@/app/lib/realtime/realtime.client";
 
 type AuthState = {
     user: User | null;
@@ -82,6 +83,8 @@ export const useAuthStore =
                         error instanceof ApiRequestError &&
                         error.status === 401
                     ) {
+                        realtimeClient.disconnect();
+
                         set({
                             user: null,
                             isHydrated: true,
@@ -219,6 +222,8 @@ export const useAuthStore =
 
                 try {
                     await logoutRequest();
+
+                    realtimeClient.disconnect();
 
                     set({
                         user: null,
