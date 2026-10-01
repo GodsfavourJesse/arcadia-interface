@@ -5,8 +5,8 @@ import {
     useRef,
 } from "react";
 
-const RING_INTERVAL_MS = 2_000;
-const RING_DURATION_MS = 700;
+const RING_INTERVAL_MS = 1_800;
+const RING_DURATION_MS = 900;
 
 export function useCallRingtone(
     enabled: boolean,
@@ -95,7 +95,7 @@ export function useCallRingtone(
         );
 
         gain.gain.exponentialRampToValueAtTime(
-            0.12,
+            0.32,
             now + 0.03,
         );
 
@@ -120,7 +120,11 @@ export function useCallRingtone(
         );
         oscillator.frequency.setValueAtTime(
             660,
-            now + 0.28,
+            now + 0.30,
+        );
+        oscillator.frequency.setValueAtTime(
+            880,
+            now + 0.58,
         );
 
         oscillator.connect(gain);

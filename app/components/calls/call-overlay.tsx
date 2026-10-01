@@ -140,8 +140,8 @@ function VideoSurface({
 
             void video.play().catch(() => {
                 /*
-                 * The receiver's Accept action is a user gesture,
-                 * but some browsers may still defer media playback.
+                 * Some browsers may defer playback until
+                 * the user has interacted with the page.
                  */
             });
         }
@@ -164,8 +164,10 @@ function VideoSurface({
 
 function RemoteAudio({
     stream,
+    enabled,
 }: {
     stream: MediaStream | null;
+    enabled: boolean;
 }) {
     const ref =
         useRef<HTMLAudioElement | null>(
@@ -180,10 +182,10 @@ function RemoteAudio({
         }
 
         audio.srcObject = stream;
-        audio.muted = false;
-        audio.volume = 1;
+        audio.muted = !enabled;
+        audio.volume = enabled ? 1 : 0;
 
-        if (stream) {
+        if (stream && enabled) {
             void audio.play().catch(() => {
                 /*
                  * Browser autoplay rules may require the
@@ -195,7 +197,7 @@ function RemoteAudio({
         return () => {
             audio.srcObject = null;
         };
-    }, [stream]);
+    }, [stream, enabled]);
 
     return (
         <audio
@@ -310,6 +312,8 @@ export function CallOverlay() {
         remoteStream,
         isMuted,
         isCameraEnabled,
+        remoteAudioEnabled,
+        remoteVideoEnabled,
         toggleMute,
         toggleCamera,
     } = useWebRTC({
@@ -382,7 +386,7 @@ export function CallOverlay() {
                     });
                 }
             } catch {
-                // Keep the fallback profile.
+                // Keep fallback profile.
             }
         }
 
@@ -514,9 +518,14 @@ export function CallOverlay() {
 
     const hasRemoteVideo =
         isVideo &&
+        remoteVideoEnabled &&
         Boolean(
             remoteStream?.getVideoTracks()
-                .length,
+                .some(
+                    (track) =>
+                        track.readyState ===
+                        "live",
+                ),
         );
 
     return (
@@ -527,6 +536,7 @@ export function CallOverlay() {
                         stream={
                             remoteStream
                         }
+                        muted
                         className="h-full w-full object-cover"
                     />
                 ) : (
@@ -552,15 +562,15 @@ export function CallOverlay() {
                 {isVideo &&
                     localStream && (
                         <div className="absolute right-4 top-4 h-36 w-28 overflow-hidden rounded-2xl border border-white/20 bg-slate-900 shadow-2xl shadow-black/40 sm:right-6 sm:top-6 sm:h-48 sm:w-36">
-                            <VideoSurface
-                                stream={
-                                    localStream
-                                }
-                                muted
-                                className="h-full w-full object-cover"
-                            />
-
-                            {!isCameraEnabled && (
+                            {isCameraEnabled ? (
+                                <VideoSurface
+                                    stream={
+                                        localStream
+                                    }
+                                    muted
+                                    className="h-full w-full object-cover"
+                                />
+                            ) : (
                                 <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
                                     <Avatar
                                         profile={{
@@ -575,16 +585,39 @@ export function CallOverlay() {
                             <span className="absolute bottom-2 left-2 rounded-full bg-black/50 px-2.5 py-1 text-[10px] font-medium text-white/75 backdrop-blur">
                                 You
                             </span>
+
+                            {isMuted && (
+                                <span className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-red-500/80 text-white shadow-lg">
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        className="h-4 w-4"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="1.8"
+                                        aria-hidden="true"
+                                    >
+                                        <path
+                                            d="M5 5l14 14"
+                                            strokeLinecap="round"
+                                        />
+                                        <path
+                                            d="M9.5 9.5V6a2.5 2.5 0 0 1 5 0v5"
+                                            strokeLinecap="round"
+                                        />
+                                    </svg>
+                                </span>
+                            )}
                         </div>
                     )}
 
-                {!isVideo && (
-                    <RemoteAudio
-                        stream={
-                            remoteStream
-                        }
-                    />
-                )}
+                <RemoteAudio
+                    stream={
+                        remoteStream
+                    }
+                    enabled={
+                        remoteAudioEnabled
+                    }
+                />
 
                 <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/45 via-transparent to-black/70" />
             </div>
@@ -616,25 +649,39 @@ export function CallOverlay() {
                     )}
                 </header>
 
-                <main className="flex flex-1 items-center justify-center px-6 pb-24">
-                    {!hasRemoteVideo && (
-                        <div className="flex flex-col items-center text-center">
-                            <h1 className="mt-7 text-2xl font-semibold tracking-tight sm:text-3xl">
-                                {
-                                    profile.displayName
-                                }
-                            </h1>
+                <main className="relative flex flex-1 items-end px-6 pb-28 sm:px-8 sm:pb-32">
+                    <div className="flex w-full items-end justify-between gap-4">
+                        <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                                <span className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">
+                                    {profile.displayName}
+                                </span>
+
+                                {isConnected && (
+                                    <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_14px_rgba(52,211,153,0.8)]" />
+                                )}
+                            </div>
 
                             {profile.username && (
-                                <p className="mt-1 text-sm text-white/45">
-                                    @
-                                    {
-                                        profile.username
-                                    }
+                                <p className="mt-1 text-sm text-white/50">
+                                    @{profile.username}
                                 </p>
                             )}
+
+                            {isVideo &&
+                                !remoteVideoEnabled && (
+                                    <p className="mt-2 inline-flex items-center rounded-full border border-white/10 bg-black/35 px-3 py-1.5 text-xs text-white/65 backdrop-blur-xl">
+                                        Camera off
+                                    </p>
+                                )}
                         </div>
-                    )}
+
+                        {!remoteAudioEnabled && (
+                            <div className="shrink-0 rounded-full border border-red-300/20 bg-red-500/15 px-3 py-2 text-xs font-medium text-red-100 backdrop-blur-xl">
+                                Microphone off
+                            </div>
+                        )}
+                    </div>
                 </main>
 
                 <footer className="px-5 pb-8 sm:px-8">
@@ -645,9 +692,9 @@ export function CallOverlay() {
                                 onClick={
                                     toggleMute
                                 }
-                                className={`flex h-12 w-12 items-center justify-center rounded-full border backdrop-blur-xl transition ${
+                                className={`group flex h-14 w-14 items-center justify-center rounded-full border backdrop-blur-xl transition active:scale-95 ${
                                     isMuted
-                                        ? "border-red-300/30 bg-red-500/25 text-red-100"
+                                        ? "border-red-300/30 bg-red-500/25 text-red-50 shadow-lg shadow-red-950/20"
                                         : "border-white/10 bg-white/10 text-white hover:bg-white/15"
                                 }`}
                                 aria-label={
@@ -656,14 +703,52 @@ export function CallOverlay() {
                                         : "Mute microphone"
                                 }
                             >
-                                <span
-                                    aria-hidden="true"
-                                    className="text-lg"
-                                >
-                                    {isMuted
-                                        ? "🔇"
-                                        : "🎙️"}
-                                </span>
+                                {isMuted ? (
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        className="h-6 w-6"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="1.8"
+                                        aria-hidden="true"
+                                    >
+                                        <path
+                                            d="M5 5l14 14"
+                                            strokeLinecap="round"
+                                        />
+                                        <path
+                                            d="M9.5 9.5V6a2.5 2.5 0 0 1 5 0v5"
+                                            strokeLinecap="round"
+                                        />
+                                        <path
+                                            d="M6.8 11.2a5.2 5.2 0 0 0 8.7 3.8M12 19v-3M9 19h6"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                        />
+                                    </svg>
+                                ) : (
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        className="h-6 w-6"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="1.8"
+                                        aria-hidden="true"
+                                    >
+                                        <rect
+                                            x="8"
+                                            y="3"
+                                            width="8"
+                                            height="12"
+                                            rx="4"
+                                        />
+                                        <path
+                                            d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                        />
+                                    </svg>
+                                )}
                             </button>
 
                             {isVideo && (
@@ -672,9 +757,9 @@ export function CallOverlay() {
                                     onClick={
                                         toggleCamera
                                     }
-                                    className={`flex h-12 w-12 items-center justify-center rounded-full border backdrop-blur-xl transition ${
+                                    className={`group flex h-14 w-14 items-center justify-center rounded-full border backdrop-blur-xl transition active:scale-95 ${
                                         !isCameraEnabled
-                                            ? "border-red-300/30 bg-red-500/25 text-red-100"
+                                            ? "border-red-300/30 bg-red-500/25 text-red-50 shadow-lg shadow-red-950/20"
                                             : "border-white/10 bg-white/10 text-white hover:bg-white/15"
                                     }`}
                                     aria-label={
@@ -683,14 +768,47 @@ export function CallOverlay() {
                                             : "Turn camera on"
                                     }
                                 >
-                                    <span
-                                        aria-hidden="true"
-                                        className="text-lg"
-                                    >
-                                        {isCameraEnabled
-                                            ? "📹"
-                                            : "🚫"}
-                                    </span>
+                                    {isCameraEnabled ? (
+                                        <svg
+                                            viewBox="0 0 24 24"
+                                            className="h-6 w-6"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="1.8"
+                                            aria-hidden="true"
+                                        >
+                                            <rect
+                                                x="3"
+                                                y="6"
+                                                width="13"
+                                                height="12"
+                                                rx="2.5"
+                                            />
+                                            <path
+                                                d="m16 10 5-3v10l-5-3z"
+                                                strokeLinejoin="round"
+                                            />
+                                        </svg>
+                                    ) : (
+                                        <svg
+                                            viewBox="0 0 24 24"
+                                            className="h-6 w-6"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="1.8"
+                                            aria-hidden="true"
+                                        >
+                                            <path
+                                                d="M3 3l18 18"
+                                                strokeLinecap="round"
+                                            />
+                                            <path
+                                                d="M9.5 6H14a2 2 0 0 1 2 2v2l5-3v10l-3.2-1.9M7 6.8A2 2 0 0 0 5 9v6a2 2 0 0 0 2 2h7"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                            />
+                                        </svg>
+                                    )}
                                 </button>
                             )}
                         </div>

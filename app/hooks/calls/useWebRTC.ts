@@ -18,6 +18,7 @@ import {
 import type {
     RealtimeWebRTCEvent,
     RealtimeWebRTCClientEvent,
+    RealtimeMediaStateEvent,
 } from "@/app/types/realtime/realtime.types";
 
 import type {
@@ -50,10 +51,17 @@ type IceServerResponse = {
     credential?: string | null;
 };
 
+type RealtimeIceCandidate = Extract<
+    RealtimeWebRTCClientEvent,
+    { type: "ICE_CANDIDATE" }
+>["candidate"];
+
 const DEFAULT_ICE_SERVERS: RTCConfiguration = {
     iceServers: [
         {
-            urls: ["stun:stun.l.google.com:19302"],
+            urls: [
+                "stun:stun.l.google.com:19302",
+            ],
         },
     ],
 };
@@ -91,12 +99,6 @@ function createMediaConstraints(
 function toIceCandidateInit(
     candidate: RTCIceCandidate,
 ): RTCIceCandidateInit {
-    /*
-     * RTCIceCandidate.candidate is a string.
-     * The browser's RTCIceCandidateInit type allows the
-     * property to be omitted/undefined, but Miyor's realtime
-     * protocol requires a concrete string.
-     */
     return {
         candidate: candidate.candidate,
         sdpMid: candidate.sdpMid,
@@ -114,20 +116,7 @@ function toIceCandidateInit(
 
 function toRealtimeIceCandidate(
     candidate: RTCIceCandidateInit,
-): RealtimeWebRTCClientEvent extends infer Event
-    ? Event extends {
-          type: "ICE_CANDIDATE";
-          candidate: infer Candidate;
-      }
-        ? Candidate
-        : never
-    : never {
-    /*
-     * RTCIceCandidateInit allows candidate to be undefined.
-     * Miyor's signaling protocol does not.
-     *
-     * Do not send malformed ICE candidates.
-     */
+): RealtimeIceCandidate {
     if (
         typeof candidate.candidate !==
         "string"
@@ -150,9 +139,7 @@ function toRealtimeIceCandidate(
                       candidate.usernameFragment,
               }
             : {}),
-    } as ReturnType<
-        typeof toRealtimeIceCandidate
-    >;
+    };
 }
 
 export function useWebRTC({
@@ -225,6 +212,12 @@ export function useWebRTC({
     const onFailedRef =
         useRef(onFailed);
 
+    const isMutedRef =
+        useRef(false);
+
+    const isCameraEnabledRef =
+        useRef(callType === "video");
+
     const [localStream, setLocalStream] =
         useState<MediaStream | null>(null);
 
@@ -241,6 +234,14 @@ export function useWebRTC({
 
     const [isCameraEnabled, setIsCameraEnabled] =
         useState(callType === "video");
+
+    const [remoteAudioEnabled, setRemoteAudioEnabled] =
+        useState(true);
+
+    const [remoteVideoEnabled, setRemoteVideoEnabled] =
+        useState(
+            callType === "video",
+        );
 
     const [error, setError] =
         useState<string | null>(null);
@@ -268,6 +269,15 @@ export function useWebRTC({
     useEffect(() => {
         onFailedRef.current = onFailed;
     }, [onFailed]);
+
+    useEffect(() => {
+        isMutedRef.current = isMuted;
+    }, [isMuted]);
+
+    useEffect(() => {
+        isCameraEnabledRef.current =
+            isCameraEnabled;
+    }, [isCameraEnabled]);
 
     const reportFailure =
         useCallback((unknownError: unknown) => {
@@ -310,6 +320,58 @@ export function useWebRTC({
 
             onConnectedRef.current?.();
         }, []);
+
+    /*
+     * Send the current local microphone/camera
+     * state to the remote participant.
+     *
+     * The actual media continues to travel directly
+     * through WebRTC. This event is only for UI/state
+     * synchronization.
+     */
+    const sendMediaState =
+        useCallback(
+            async (
+                audioEnabled: boolean,
+                videoEnabled: boolean,
+            ) => {
+                const currentCallId =
+                    callIdRef.current;
+
+                if (!currentCallId) {
+                    return;
+                }
+
+                const available =
+                    await realtimeClient.waitUntilOpen(
+                        10_000,
+                    );
+
+                if (!available) {
+                    console.warn(
+                        "[WebRTC] Unable to send media state: realtime unavailable.",
+                    );
+
+                    return;
+                }
+
+                const sent =
+                    realtimeClient.send({
+                        type: "MEDIA_STATE",
+                        callId:
+                            currentCallId,
+                        audioEnabled,
+                        videoEnabled,
+                    });
+
+                if (!sent) {
+                    console.warn(
+                        "[WebRTC] Unable to send media state.",
+                    );
+                }
+            },
+            [],
+        );
 
     const cleanup = useCallback(() => {
         const peer =
@@ -367,6 +429,12 @@ export function useWebRTC({
         iceServersRef.current =
             DEFAULT_ICE_SERVERS.iceServers ?? [];
 
+        isMutedRef.current = false;
+
+        isCameraEnabledRef.current =
+            callTypeRef.current ===
+            "video";
+
         setLocalStream(null);
         setRemoteStream(null);
         setConnectionState("idle");
@@ -374,7 +442,15 @@ export function useWebRTC({
         setIsMuted(false);
 
         setIsCameraEnabled(
-            callTypeRef.current === "video",
+            callTypeRef.current ===
+                "video",
+        );
+
+        setRemoteAudioEnabled(true);
+
+        setRemoteVideoEnabled(
+            callTypeRef.current ===
+                "video",
         );
     }, []);
 
@@ -393,14 +469,24 @@ export function useWebRTC({
             return;
         }
 
-        const nextMuted = !isMuted;
+        const nextMuted =
+            !isMutedRef.current;
 
         for (const track of tracks) {
-            track.enabled = !nextMuted;
+            track.enabled =
+                !nextMuted;
         }
 
+        isMutedRef.current =
+            nextMuted;
+
         setIsMuted(nextMuted);
-    }, [isMuted]);
+
+        void sendMediaState(
+            !nextMuted,
+            isCameraEnabledRef.current,
+        );
+    }, [sendMediaState]);
 
     const toggleCamera = useCallback(() => {
         const stream =
@@ -418,14 +504,25 @@ export function useWebRTC({
         }
 
         const nextEnabled =
-            !isCameraEnabled;
+            !isCameraEnabledRef.current;
 
         for (const track of tracks) {
-            track.enabled = nextEnabled;
+            track.enabled =
+                nextEnabled;
         }
 
-        setIsCameraEnabled(nextEnabled);
-    }, [isCameraEnabled]);
+        isCameraEnabledRef.current =
+            nextEnabled;
+
+        setIsCameraEnabled(
+            nextEnabled,
+        );
+
+        void sendMediaState(
+            !isMutedRef.current,
+            nextEnabled,
+        );
+    }, [sendMediaState]);
 
     const waitForRealtime =
         useCallback(async () => {
@@ -452,7 +549,8 @@ export function useWebRTC({
                 return;
             }
 
-            flushingLocalIceRef.current = true;
+            flushingLocalIceRef.current =
+                true;
 
             try {
                 await waitForRealtime();
@@ -472,7 +570,8 @@ export function useWebRTC({
 
                 for (
                     let index = 0;
-                    index < candidates.length;
+                    index <
+                    candidates.length;
                     index += 1
                 ) {
                     const candidate =
@@ -498,17 +597,13 @@ export function useWebRTC({
                     const sent =
                         realtimeClient.send({
                             type: "ICE_CANDIDATE",
-                            callId: callIdValue,
+                            callId:
+                                callIdValue,
                             candidate:
                                 realtimeCandidate,
                         });
 
                     if (!sent) {
-                        /*
-                         * Preserve this candidate and every candidate
-                         * after it so a reconnect can retry the full
-                         * remainder in order.
-                         */
                         pendingLocalIceCandidatesRef.current =
                             candidates
                                 .slice(index)
@@ -627,7 +722,9 @@ export function useWebRTC({
                             }),
                         );
 
-                if (servers.length > 0) {
+                if (
+                    servers.length > 0
+                ) {
                     iceServersRef.current =
                         servers;
                 }
@@ -671,13 +768,21 @@ export function useWebRTC({
             );
 
             peer.ontrack = (event) => {
+                /*
+                 * Always use the actual incoming WebRTC
+                 * track. Do not use the local stream here.
+                 */
                 const tracks =
                     event.streams.length > 0
                         ? event.streams.flatMap(
-                              (stream) =>
+                              (
+                                  stream,
+                              ) =>
                                   stream.getTracks(),
                           )
-                        : [event.track];
+                        : [
+                              event.track,
+                          ];
 
                 for (const track of tracks) {
                     if (
@@ -829,7 +934,8 @@ export function useWebRTC({
             }
 
             if (
-                !navigator.mediaDevices?.getUserMedia
+                !navigator.mediaDevices
+                    ?.getUserMedia
             ) {
                 throw new Error(
                     "Camera and microphone are unavailable in this browser.",
@@ -852,6 +958,13 @@ export function useWebRTC({
                     stream;
 
                 setLocalStream(stream);
+
+                isMutedRef.current =
+                    false;
+
+                isCameraEnabledRef.current =
+                    type === "video";
+
                 setIsMuted(false);
 
                 setIsCameraEnabled(
@@ -911,7 +1024,8 @@ export function useWebRTC({
                     const exists =
                         senders.some(
                             (sender) =>
-                                sender.track?.id ===
+                                sender.track
+                                    ?.id ===
                                 track.id,
                         );
 
@@ -951,7 +1065,9 @@ export function useWebRTC({
                     const description =
                         peer.localDescription;
 
-                    if (!description?.sdp) {
+                    if (
+                        !description?.sdp
+                    ) {
                         throw new Error(
                             "WebRTC offer is unavailable.",
                         );
@@ -1012,7 +1128,9 @@ export function useWebRTC({
                     return;
                 }
 
-                if (!enabledRef.current) {
+                if (
+                    !enabledRef.current
+                ) {
                     pendingOfferRef.current =
                         event;
 
@@ -1059,7 +1177,8 @@ export function useWebRTC({
 
                 await sendSignalingEvent({
                     type: "ANSWER",
-                    callId: event.callId,
+                    callId:
+                        event.callId,
                     sdp: description.sdp,
                 });
 
@@ -1168,11 +1287,13 @@ export function useWebRTC({
         );
 
     /*
-     * Keep signaling subscribed for the entire lifetime
-     * of a call, including ringing.
+     * Subscribe to WebRTC signaling and remote media state.
      */
     useEffect(() => {
-        if (!callId || !callType) {
+        if (
+            !callId ||
+            !callType
+        ) {
             return;
         }
 
@@ -1180,10 +1301,14 @@ export function useWebRTC({
             realtimeClient.subscribe(
                 (event) => {
                     if (
-                        event.type !== "OFFER" &&
-                        event.type !== "ANSWER" &&
                         event.type !==
-                            "ICE_CANDIDATE"
+                            "OFFER" &&
+                        event.type !==
+                            "ANSWER" &&
+                        event.type !==
+                            "ICE_CANDIDATE" &&
+                        event.type !==
+                            "MEDIA_STATE"
                     ) {
                         return;
                     }
@@ -1192,6 +1317,24 @@ export function useWebRTC({
                         event.callId !==
                         callIdRef.current
                     ) {
+                        return;
+                    }
+
+                    if (
+                        event.type ===
+                        "MEDIA_STATE"
+                    ) {
+                        const mediaEvent =
+                            event as RealtimeMediaStateEvent;
+
+                        setRemoteAudioEnabled(
+                            mediaEvent.audioEnabled,
+                        );
+
+                        setRemoteVideoEnabled(
+                            mediaEvent.videoEnabled,
+                        );
+
                         return;
                     }
 
@@ -1242,7 +1385,10 @@ export function useWebRTC({
      * realtime socket reconnects.
      */
     useEffect(() => {
-        if (!callId || !callType) {
+        if (
+            !callId ||
+            !callType
+        ) {
             return;
         }
 
@@ -1256,6 +1402,16 @@ export function useWebRTC({
                     }
 
                     void flushLocalIceCandidates();
+
+                    /*
+                     * Re-send current media state after
+                     * reconnect so the remote UI can
+                     * recover its state.
+                     */
+                    void sendMediaState(
+                        !isMutedRef.current,
+                        isCameraEnabledRef.current,
+                    );
 
                     if (
                         !isCallerRef.current
@@ -1294,6 +1450,7 @@ export function useWebRTC({
         createOffer,
         flushLocalIceCandidates,
         reportFailure,
+        sendMediaState,
     ]);
 
     /*
@@ -1370,10 +1527,17 @@ export function useWebRTC({
                     setConnectionState(
                         "connecting",
                     );
+
+                    void sendMediaState(
+                        !isMutedRef.current,
+                        isCameraEnabledRef.current,
+                    );
                 }
             } catch (error) {
                 if (!cancelled) {
-                    reportFailure(error);
+                    reportFailure(
+                        error,
+                    );
                 }
             }
         }
@@ -1393,6 +1557,7 @@ export function useWebRTC({
         createPeerConnection,
         addLocalTracks,
         reportFailure,
+        sendMediaState,
     ]);
 
     /*
@@ -1434,10 +1599,17 @@ export function useWebRTC({
                     return;
                 }
 
+                void sendMediaState(
+                    !isMutedRef.current,
+                    isCameraEnabledRef.current,
+                );
+
                 await createOffer(peer);
             } catch (error) {
                 if (!cancelled) {
-                    reportFailure(error);
+                    reportFailure(
+                        error,
+                    );
                 }
             }
         }
@@ -1458,13 +1630,17 @@ export function useWebRTC({
         addLocalTracks,
         createOffer,
         reportFailure,
+        sendMediaState,
     ]);
 
     /*
      * Release media when the call disappears.
      */
     useEffect(() => {
-        if (callId && callType) {
+        if (
+            callId &&
+            callType
+        ) {
             return;
         }
 
@@ -1478,10 +1654,15 @@ export function useWebRTC({
     return {
         localStream,
         remoteStream,
+
         connectionState,
         error,
+
         isMuted,
         isCameraEnabled,
+
+        remoteAudioEnabled,
+        remoteVideoEnabled,
 
         isConnected:
             connectionState ===
@@ -1495,6 +1676,7 @@ export function useWebRTC({
 
         toggleMute,
         toggleCamera,
+
         cleanup,
     };
 }
