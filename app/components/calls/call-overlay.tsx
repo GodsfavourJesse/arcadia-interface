@@ -1,9 +1,11 @@
 "use client";
 
 import {
+    useCallback,
     useEffect,
     useRef,
     useState,
+    type ReactNode,
 } from "react";
 
 import {
@@ -21,6 +23,10 @@ import {
 import {
     useCallRingtone,
 } from "@/app/hooks/calls/useCallRingtone";
+
+import {
+    useAvatarMedia,
+} from "@/app/hooks/avatar/useAvatarMedia";
 
 import {
     useCallStore,
@@ -42,6 +48,10 @@ import {
 import {
     OutgoingCallModal,
 } from "./outgoing-call-modal";
+
+import {
+    AvatarPreview,
+} from "./avatar/avatar-preview";
 
 type Profile = {
     displayName: string;
@@ -75,9 +85,7 @@ function Avatar({
     if (profile.profilePictureUrl) {
         return (
             <img
-                src={
-                    profile.profilePictureUrl
-                }
+                src={profile.profilePictureUrl}
                 alt=""
                 className={`${sizeClass} rounded-full object-cover ring-4 ring-white/10`}
             />
@@ -164,8 +172,10 @@ function VideoSurface({
 
 function RemoteAudio({
     stream,
+    enabled,
 }: {
     stream: MediaStream | null;
+    enabled: boolean;
 }) {
     const ref =
         useRef<HTMLAudioElement | null>(
@@ -186,10 +196,10 @@ function RemoteAudio({
         audio.srcObject = stream;
 
         audio.autoplay = true;
-        audio.muted = false;
-        audio.volume = 1;
+        audio.muted = !enabled;
+        audio.volume = enabled ? 1 : 0;
 
-        if (stream) {
+        if (stream && enabled) {
             void audio.play().catch((error) => {
                 console.warn(
                     "[WebRTC] Remote audio playback requires user interaction:",
@@ -202,7 +212,7 @@ function RemoteAudio({
             audio.pause();
             audio.srcObject = null;
         };
-    }, [stream]);
+    }, [stream, enabled]);
 
     return (
         <audio
@@ -210,6 +220,121 @@ function RemoteAudio({
             autoPlay
             playsInline
         />
+    );
+}
+
+function MediaButton({
+    active = false,
+    disabled = false,
+    label,
+    onClick,
+    children,
+}: {
+    active?: boolean;
+    disabled?: boolean;
+    label: string;
+    onClick: () => void;
+    children: ReactNode;
+}) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            disabled={disabled}
+            aria-label={label}
+            aria-pressed={active}
+            className={[
+                "flex h-14 w-14 items-center justify-center rounded-full",
+                "border backdrop-blur-xl transition",
+                "active:scale-95",
+                "disabled:cursor-not-allowed disabled:opacity-40",
+                active
+                    ? "border-violet-300/30 bg-violet-500/25 text-violet-50 shadow-lg shadow-violet-950/20"
+                    : "border-white/10 bg-white/10 text-white hover:bg-white/15",
+            ].join(" ")}
+        >
+            {children}
+        </button>
+    );
+}
+
+function AvatarIcon() {
+    return (
+        <svg
+            viewBox="0 0 24 24"
+            className="h-6 w-6"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            aria-hidden="true"
+        >
+            <circle
+                cx="12"
+                cy="8"
+                r="3.2"
+            />
+
+            <path
+                d="M5.5 19.2c.8-3.2 3.1-5 6.5-5s5.7 1.8 6.5 5"
+                strokeLinecap="round"
+            />
+
+            <path
+                d="M4 8.5a8 8 0 0 0 2 5.4M20 8.5a8 8 0 0 1-2 5.4"
+                strokeLinecap="round"
+                opacity=".55"
+            />
+        </svg>
+    );
+}
+
+function SpeakerIcon({
+    muted,
+}: {
+    muted: boolean;
+}) {
+    if (muted) {
+        return (
+            <svg
+                viewBox="0 0 24 24"
+                className="h-6 w-6"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                aria-hidden="true"
+            >
+                <path
+                    d="m4 9 4-3h3v12H8l-4-3V9Z"
+                    strokeLinejoin="round"
+                />
+
+                <path
+                    d="m16 9 5 5M21 9l-5 5"
+                    strokeLinecap="round"
+                />
+            </svg>
+        );
+    }
+
+    return (
+        <svg
+            viewBox="0 0 24 24"
+            className="h-6 w-6"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            aria-hidden="true"
+        >
+            <path
+                d="m4 9 4-3h3v12H8l-4-3V9Z"
+                strokeLinejoin="round"
+            />
+
+            <path
+                d="M15 9.5a4 4 0 0 1 0 5M18 7a7.5 7.5 0 0 1 0 10"
+                strokeLinecap="round"
+            />
+        </svg>
     );
 }
 
@@ -307,10 +432,16 @@ export function CallOverlay() {
     const [elapsed, setElapsed] =
         useState(0);
 
+    const [isSpeakerEnabled, setIsSpeakerEnabled] =
+        useState(true);
+
     const enabled =
         Boolean(activeCall) &&
         !isTerminal &&
         (isAccepted || isConnected);
+
+    const isVideoCall =
+        activeCall?.type === CALL_TYPE.VIDEO;
 
     const {
         localStream,
@@ -321,6 +452,7 @@ export function CallOverlay() {
         remoteVideoEnabled,
         toggleMute,
         toggleCamera,
+        replaceVideoTrack,
     } = useWebRTC({
         callId:
             activeCall?.id ?? null,
@@ -339,6 +471,84 @@ export function CallOverlay() {
             void fail();
         },
     });
+
+    const avatarModelUrl =
+        process.env.NEXT_PUBLIC_MIYOR_AVATAR_MODEL_URL ??
+        "/avatars/default-avatar.vrm";
+
+    const {
+        avatarVideoTrack,
+        isAvatarActive,
+        error: avatarError,
+        handleAvatarCanvasReady,
+        toggleAvatar,
+        disableAvatar,
+    } = useAvatarMedia({
+        cameraStream: localStream,
+        enabled:
+            isVideoCall &&
+            isAccepted &&
+            isConnected &&
+            isCameraEnabled,
+        replaceVideoTrack,
+    });
+
+    const handleCameraToggle =
+        useCallback(async () => {
+            /*
+             * Avatar mode uses the avatar track as the
+             * WebRTC video sender track. Camera-off must
+             * therefore restore the physical camera first.
+             */
+            if (isAvatarActive) {
+                try {
+                    await disableAvatar();
+                } catch {
+                    return;
+                }
+            }
+
+            toggleCamera();
+        }, [
+            disableAvatar,
+            isAvatarActive,
+            toggleCamera,
+        ]);
+
+    const handleAvatarToggle =
+        useCallback(async () => {
+            if (
+                !isVideoCall ||
+                !isConnected ||
+                !isCameraEnabled ||
+                !avatarVideoTrack
+            ) {
+                return;
+            }
+
+            try {
+                await toggleAvatar();
+            } catch {
+                /*
+                 * useAvatarMedia owns and exposes the actual
+                 * error state. The call overlay displays it
+                 * through the existing error surface.
+                 */
+            }
+        }, [
+            avatarVideoTrack,
+            isCameraEnabled,
+            isConnected,
+            isVideoCall,
+            toggleAvatar,
+        ]);
+
+    const toggleSpeaker =
+        useCallback(() => {
+            setIsSpeakerEnabled(
+                (current) => !current,
+            );
+        }, []);
 
     const isRinging =
         Boolean(activeCall) &&
@@ -391,7 +601,9 @@ export function CallOverlay() {
                     });
                 }
             } catch {
-                // Keep fallback profile.
+                /*
+                 * Keep fallback profile.
+                 */
             }
         }
 
@@ -450,7 +662,7 @@ export function CallOverlay() {
     ]);
 
     useEffect(() => {
-        if (!error) {
+        if (!error && !avatarError) {
             return;
         }
 
@@ -466,6 +678,7 @@ export function CallOverlay() {
             );
     }, [
         error,
+        avatarError,
         clearError,
     ]);
 
@@ -487,6 +700,34 @@ export function CallOverlay() {
                 timer,
             );
     }, [isTerminal, reset]);
+
+    /*
+     * If the call ceases to be a valid video call while
+     * avatar mode is active, restore the physical camera
+     * track before the call lifecycle is torn down.
+     */
+    useEffect(() => {
+        if (
+            isAvatarActive &&
+            (!isVideoCall ||
+                !isAccepted ||
+                !isConnected ||
+                !isCameraEnabled)
+        ) {
+            void disableAvatar().catch(() => {
+                /*
+                 * Call teardown owns the final cleanup.
+                 */
+            });
+        }
+    }, [
+        disableAvatar,
+        isAccepted,
+        isAvatarActive,
+        isCameraEnabled,
+        isConnected,
+        isVideoCall,
+    ]);
 
     if (!activeCall) {
         return null;
@@ -533,6 +774,9 @@ export function CallOverlay() {
                 ),
         );
 
+    const displayedError =
+        avatarError ?? error;
+
     return (
         <div className="fixed inset-0 z-[100] overflow-hidden bg-slate-950 text-white">
             <div className="absolute inset-0">
@@ -566,8 +810,31 @@ export function CallOverlay() {
 
                 {isVideo &&
                     localStream && (
-                        <div className="absolute right-4 top-4 h-36 w-28 overflow-hidden rounded-2xl border border-white/20 bg-slate-900 shadow-2xl shadow-black/40 sm:right-6 sm:top-6 sm:h-48 sm:w-36">
-                            {isCameraEnabled ? (
+                        <div
+                            className={[
+                                "absolute right-4 top-4 overflow-hidden rounded-2xl",
+                                "border border-white/20 bg-slate-900",
+                                "shadow-2xl shadow-black/40",
+                                "sm:right-6 sm:top-6",
+                                isAvatarActive
+                                    ? "h-44 w-72 sm:h-56 sm:w-[30rem]"
+                                    : "h-36 w-28 sm:h-48 sm:w-36",
+                            ].join(" ")}
+                        >
+                            {isAvatarActive ? (
+                                <AvatarPreview
+                                    cameraStream={
+                                        localStream
+                                    }
+                                    modelUrl={
+                                        avatarModelUrl
+                                    }
+                                    trackingEnabled
+                                    onAvatarCanvasReady={
+                                        handleAvatarCanvasReady
+                                    }
+                                />
+                            ) : isCameraEnabled ? (
                                 <VideoSurface
                                     stream={
                                         localStream
@@ -588,7 +855,9 @@ export function CallOverlay() {
                             )}
 
                             <span className="absolute bottom-2 left-2 rounded-full bg-black/50 px-2.5 py-1 text-[10px] font-medium text-white/75 backdrop-blur">
-                                You
+                                {isAvatarActive
+                                    ? "You · Avatar"
+                                    : "You"}
                             </span>
 
                             {isMuted && (
@@ -605,6 +874,7 @@ export function CallOverlay() {
                                             d="M5 5l14 14"
                                             strokeLinecap="round"
                                         />
+
                                         <path
                                             d="M9.5 9.5V6a2.5 2.5 0 0 1 5 0v5"
                                             strokeLinecap="round"
@@ -618,6 +888,9 @@ export function CallOverlay() {
                 <RemoteAudio
                     stream={
                         remoteStream
+                    }
+                    enabled={
+                        isSpeakerEnabled
                     }
                 />
 
@@ -689,20 +962,15 @@ export function CallOverlay() {
                 <footer className="px-5 pb-8 sm:px-8">
                     {localStream && (
                         <div className="mb-5 flex items-center justify-center gap-3">
-                            <button
-                                type="button"
-                                onClick={
-                                    toggleMute
-                                }
-                                className={`group flex h-14 w-14 items-center justify-center rounded-full border backdrop-blur-xl transition active:scale-95 ${
-                                    isMuted
-                                        ? "border-red-300/30 bg-red-500/25 text-red-50 shadow-lg shadow-red-950/20"
-                                        : "border-white/10 bg-white/10 text-white hover:bg-white/15"
-                                }`}
-                                aria-label={
+                            <MediaButton
+                                active={!isMuted}
+                                label={
                                     isMuted
                                         ? "Unmute microphone"
                                         : "Mute microphone"
+                                }
+                                onClick={
+                                    toggleMute
                                 }
                             >
                                 {isMuted ? (
@@ -718,10 +986,12 @@ export function CallOverlay() {
                                             d="M5 5l14 14"
                                             strokeLinecap="round"
                                         />
+
                                         <path
                                             d="M9.5 9.5V6a2.5 2.5 0 0 1 5 0v5"
                                             strokeLinecap="round"
                                         />
+
                                         <path
                                             d="M6.8 11.2a5.2 5.2 0 0 0 8.7 3.8M12 19v-3M9 19h6"
                                             strokeLinecap="round"
@@ -744,6 +1014,7 @@ export function CallOverlay() {
                                             height="12"
                                             rx="4"
                                         />
+
                                         <path
                                             d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"
                                             strokeLinecap="round"
@@ -751,68 +1022,113 @@ export function CallOverlay() {
                                         />
                                     </svg>
                                 )}
-                            </button>
+                            </MediaButton>
 
                             {isVideo && (
-                                <button
-                                    type="button"
-                                    onClick={
-                                        toggleCamera
-                                    }
-                                    className={`group flex h-14 w-14 items-center justify-center rounded-full border backdrop-blur-xl transition active:scale-95 ${
-                                        !isCameraEnabled
-                                            ? "border-red-300/30 bg-red-500/25 text-red-50 shadow-lg shadow-red-950/20"
-                                            : "border-white/10 bg-white/10 text-white hover:bg-white/15"
-                                    }`}
-                                    aria-label={
-                                        isCameraEnabled
-                                            ? "Turn camera off"
-                                            : "Turn camera on"
-                                    }
-                                >
-                                    {isCameraEnabled ? (
-                                        <svg
-                                            viewBox="0 0 24 24"
-                                            className="h-6 w-6"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            strokeWidth="1.8"
-                                            aria-hidden="true"
-                                        >
-                                            <rect
-                                                x="3"
-                                                y="6"
-                                                width="13"
-                                                height="12"
-                                                rx="2.5"
-                                            />
-                                            <path
-                                                d="m16 10 5-3v10l-5-3z"
-                                                strokeLinejoin="round"
-                                            />
-                                        </svg>
-                                    ) : (
-                                        <svg
-                                            viewBox="0 0 24 24"
-                                            className="h-6 w-6"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            strokeWidth="1.8"
-                                            aria-hidden="true"
-                                        >
-                                            <path
-                                                d="M3 3l18 18"
-                                                strokeLinecap="round"
-                                            />
-                                            <path
-                                                d="M9.5 6H14a2 2 0 0 1 2 2v2l5-3v10l-3.2-1.9M7 6.8A2 2 0 0 0 5 9v6a2 2 0 0 0 2 2h7"
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                            />
-                                        </svg>
-                                    )}
-                                </button>
+                                <>
+                                    <MediaButton
+                                        active={
+                                            isCameraEnabled
+                                        }
+                                        label={
+                                            isCameraEnabled
+                                                ? "Turn camera off"
+                                                : "Turn camera on"
+                                        }
+                                        onClick={() =>
+                                            void handleCameraToggle()
+                                        }
+                                    >
+                                        {isCameraEnabled ? (
+                                            <svg
+                                                viewBox="0 0 24 24"
+                                                className="h-6 w-6"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                strokeWidth="1.8"
+                                                aria-hidden="true"
+                                            >
+                                                <rect
+                                                    x="3"
+                                                    y="6"
+                                                    width="13"
+                                                    height="12"
+                                                    rx="2.5"
+                                                />
+
+                                                <path
+                                                    d="m16 10 5-3v10l-5-3z"
+                                                    strokeLinejoin="round"
+                                                />
+                                            </svg>
+                                        ) : (
+                                            <svg
+                                                viewBox="0 0 24 24"
+                                                className="h-6 w-6"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                strokeWidth="1.8"
+                                                aria-hidden="true"
+                                            >
+                                                <path
+                                                    d="M3 3l18 18"
+                                                    strokeLinecap="round"
+                                                />
+
+                                                <path
+                                                    d="M9.5 6H14a2 2 0 0 1 2 2v2l5-3v10l-3.2-1.9M7 6.8A2 2 0 0 0 5 9v6a2 2 0 0 0 2 2h7"
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                />
+                                            </svg>
+                                        )}
+                                    </MediaButton>
+
+                                    <MediaButton
+                                        active={
+                                            isAvatarActive
+                                        }
+                                        disabled={
+                                            !isCameraEnabled ||
+                                            !isConnected ||
+                                            !avatarVideoTrack ||
+                                            Boolean(
+                                                avatarError,
+                                            )
+                                        }
+                                        label={
+                                            isAvatarActive
+                                                ? "Turn avatar off"
+                                                : "Turn avatar on"
+                                        }
+                                        onClick={() =>
+                                            void handleAvatarToggle()
+                                        }
+                                    >
+                                        <AvatarIcon />
+                                    </MediaButton>
+                                </>
                             )}
+
+                            <MediaButton
+                                active={
+                                    isSpeakerEnabled
+                                }
+                                label={
+                                    isSpeakerEnabled
+                                        ? "Turn speaker off"
+                                        : "Turn speaker on"
+                                }
+                                onClick={
+                                    toggleSpeaker
+                                }
+                            >
+                                <SpeakerIcon
+                                    muted={
+                                        !isSpeakerEnabled
+                                    }
+                                />
+                            </MediaButton>
                         </div>
                     )}
 
@@ -848,7 +1164,7 @@ export function CallOverlay() {
                         }
                     />
 
-                    {error && (
+                    {displayedError && (
                         <button
                             type="button"
                             onClick={
@@ -856,7 +1172,7 @@ export function CallOverlay() {
                             }
                             className="mx-auto mt-4 block max-w-md rounded-xl border border-red-300/20 bg-red-500/10 px-4 py-3 text-left text-xs text-red-100 backdrop-blur-xl"
                         >
-                            {error}
+                            {displayedError}
                         </button>
                     )}
                 </footer>

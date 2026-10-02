@@ -24,14 +24,32 @@ import type {
     CallType,
 } from "@/app/types/calls/calls.types";
 
-type WebRTCConnectionState =
-    | "idle"
-    | "requesting-media"
-    | "connecting"
-    | "connected"
-    | "disconnected"
-    | "failed"
-    | "closed";
+import type {
+    WebRTCConnectionState,
+    IceServerResponse,
+} from "../webrtc/webrtc.types";
+
+import {
+    DEFAULT_ICE_SERVERS,
+} from "../webrtc/webrtc.constants";
+
+import {
+    createMediaConstraints,
+    configureAudioTracks,
+    getAudioDiagnostics,
+    stopMediaStream,
+} from "../webrtc/webrtc.media";
+
+import {
+    toIceCandidateInit,
+    toRealtimeIceCandidate,
+} from "../webrtc/webrtc.ice";
+
+import {
+    createPeerConnection as createPeerConnectionInstance,
+    addLocalTracks as addLocalTracksToPeer,
+    replaceVideoTrack as replacePeerVideoTrack,
+} from "../webrtc/webrtc.peer";
 
 type UseWebRTCOptions = {
     callId: string | null;
@@ -41,134 +59,6 @@ type UseWebRTCOptions = {
     onConnected?: () => void;
     onFailed?: (error: Error) => void;
 };
-
-type IceServerResponse = {
-    urls:
-        | string
-        | string[];
-    username?: string | null;
-    credential?: string | null;
-};
-
-type RealtimeIceCandidate = Extract<
-    RealtimeWebRTCClientEvent,
-    { type: "ICE_CANDIDATE" }
->["candidate"];
-
-const DEFAULT_ICE_SERVERS: RTCConfiguration = {
-    iceServers: [
-        {
-            urls: [
-                "stun:stun.l.google.com:19302",
-            ],
-        },
-    ],
-};
-
-/*
- * Microphone/camera capture configuration.
- *
- * Audio processing is requested from the browser so that
- * WebRTC can use the device/browser's native:
- *
- * - Echo cancellation
- * - Noise suppression
- * - Automatic gain control
- *
- * Mono is preferred because Miyor is transmitting speech,
- * not music or stereo content.
- */
-function createMediaConstraints(
-    callType: CallType,
-): MediaStreamConstraints {
-    const audio: MediaTrackConstraints = {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-
-        channelCount: {
-            ideal: 1,
-        },
-    };
-
-    if (callType === "video") {
-        return {
-            audio,
-
-            video: {
-                facingMode: "user",
-
-                width: {
-                    ideal: 1280,
-                    max: 1920,
-                },
-
-                height: {
-                    ideal: 720,
-                    max: 1080,
-                },
-
-                frameRate: {
-                    ideal: 30,
-                    max: 30,
-                },
-            },
-        };
-    }
-
-    return {
-        audio,
-        video: false,
-    };
-}
-
-function toIceCandidateInit(
-    candidate: RTCIceCandidate,
-): RTCIceCandidateInit {
-    return {
-        candidate: candidate.candidate,
-        sdpMid: candidate.sdpMid,
-        sdpMLineIndex:
-            candidate.sdpMLineIndex,
-
-        ...(candidate.usernameFragment !==
-        undefined
-            ? {
-                  usernameFragment:
-                      candidate.usernameFragment,
-              }
-            : {}),
-    };
-}
-
-function toRealtimeIceCandidate(
-    candidate: RTCIceCandidateInit,
-): RealtimeIceCandidate {
-    if (
-        typeof candidate.candidate !==
-        "string"
-    ) {
-        throw new Error(
-            "Invalid WebRTC ICE candidate.",
-        );
-    }
-
-    return {
-        candidate: candidate.candidate,
-        sdpMid:
-            candidate.sdpMid ?? null,
-        sdpMLineIndex:
-            candidate.sdpMLineIndex ?? null,
-
-        ...(candidate.usernameFragment !==
-        undefined
-            ? {
-                  usernameFragment:
-                      candidate.usernameFragment,
-              }
-            : {}),
-    };
-}
 
 export function useWebRTC({
     callId,
@@ -180,6 +70,16 @@ export function useWebRTC({
 }: UseWebRTCOptions) {
     const peerConnectionRef =
         useRef<RTCPeerConnection | null>(
+            null,
+        );
+
+    const videoSenderRef =
+        useRef<RTCRtpSender | null>(
+            null,
+        );
+
+    const audioSenderRef =
+        useRef<RTCRtpSender | null>(
             null,
         );
 
@@ -203,10 +103,14 @@ export function useWebRTC({
         );
 
     const pendingIceCandidatesRef =
-        useRef<RTCIceCandidateInit[]>([]);
+        useRef<RTCIceCandidateInit[]>(
+            [],
+        );
 
     const pendingLocalIceCandidatesRef =
-        useRef<RTCIceCandidateInit[]>([]);
+        useRef<RTCIceCandidateInit[]>(
+            [],
+        );
 
     const flushingLocalIceRef =
         useRef(false);
@@ -306,19 +210,23 @@ export function useWebRTC({
         );
 
     useEffect(() => {
-        callIdRef.current = callId;
+        callIdRef.current =
+            callId;
     }, [callId]);
 
     useEffect(() => {
-        callTypeRef.current = callType;
+        callTypeRef.current =
+            callType;
     }, [callType]);
 
     useEffect(() => {
-        isCallerRef.current = isCaller;
+        isCallerRef.current =
+            isCaller;
     }, [isCaller]);
 
     useEffect(() => {
-        enabledRef.current = enabled;
+        enabledRef.current =
+            enabled;
     }, [enabled]);
 
     useEffect(() => {
@@ -332,7 +240,8 @@ export function useWebRTC({
     }, [onFailed]);
 
     useEffect(() => {
-        isMutedRef.current = isMuted;
+        isMutedRef.current =
+            isMuted;
     }, [isMuted]);
 
     useEffect(() => {
@@ -450,11 +359,18 @@ export function useWebRTC({
             peerConnectionRef.current =
                 null;
 
+            videoSenderRef.current =
+                null;
+
+            audioSenderRef.current =
+                null;
+
             if (peer) {
                 peer.onicecandidate =
                     null;
 
-                peer.ontrack = null;
+                peer.ontrack =
+                    null;
 
                 peer.onconnectionstatechange =
                     null;
@@ -478,11 +394,9 @@ export function useWebRTC({
             localStreamRef.current =
                 null;
 
-            if (stream) {
-                for (const track of stream.getTracks()) {
-                    track.stop();
-                }
-            }
+            stopMediaStream(
+                stream,
+            );
 
             remoteStreamRef.current =
                 null;
@@ -525,16 +439,25 @@ export function useWebRTC({
                 callTypeRef.current ===
                 "video";
 
-            setLocalStream(null);
-            setRemoteStream(null);
+            setLocalStream(
+                null,
+            );
+
+            setRemoteStream(
+                null,
+            );
 
             setConnectionState(
                 "idle",
             );
 
-            setError(null);
+            setError(
+                null,
+            );
 
-            setIsMuted(false);
+            setIsMuted(
+                false,
+            );
 
             setIsCameraEnabled(
                 callTypeRef.current ===
@@ -578,7 +501,9 @@ export function useWebRTC({
             isMutedRef.current =
                 nextMuted;
 
-            setIsMuted(nextMuted);
+            setIsMuted(
+                nextMuted,
+            );
 
             void sendMediaState(
                 !nextMuted,
@@ -623,106 +548,151 @@ export function useWebRTC({
             );
         }, [sendMediaState]);
 
-    const waitForRealtime =
-        useCallback(async () => {
-            const available =
-                await realtimeClient.waitUntilOpen(
-                    10_000,
-                );
+    /*
+     * Replace the video track already owned by
+     * the active RTCRtpSender.
+     *
+     * This intentionally does NOT:
+     * - create a new RTCPeerConnection
+     * - add another track
+     * - create a new offer
+     * - create a new answer
+     * - renegotiate the call
+     *
+     * It is therefore suitable for switching between
+     * the physical camera track and the local avatar
+     * canvas track during an active call.
+     */
+    const replaceVideoTrack =
+        useCallback(
+            async (
+                nextTrack: MediaStreamTrack | null,
+            ): Promise<void> => {
+                const sender =
+                    videoSenderRef.current;
 
-            if (!available) {
-                throw new Error(
-                    "Realtime connection is unavailable.",
+                if (!sender) {
+                    throw new Error(
+                        "WebRTC video sender is not available.",
+                    );
+                }
+
+                await replacePeerVideoTrack(
+                    sender,
+                    nextTrack,
                 );
-            }
-        }, []);
+            },
+            [],
+        );
+
+    const waitForRealtime =
+        useCallback(
+            async () => {
+                const available =
+                    await realtimeClient.waitUntilOpen(
+                        10_000,
+                    );
+
+                if (!available) {
+                    throw new Error(
+                        "Realtime connection is unavailable.",
+                    );
+                }
+            },
+            [],
+        );
 
     const flushLocalIceCandidates =
-        useCallback(async () => {
-            if (
-                flushingLocalIceRef.current ||
-                pendingLocalIceCandidatesRef
-                    .current.length === 0 ||
-                !callIdRef.current
-            ) {
-                return;
-            }
-
-            flushingLocalIceRef.current =
-                true;
-
-            try {
-                await waitForRealtime();
-
-                const callIdValue =
-                    callIdRef.current;
-
-                if (!callIdValue) {
+        useCallback(
+            async () => {
+                if (
+                    flushingLocalIceRef.current ||
+                    pendingLocalIceCandidatesRef
+                        .current.length === 0 ||
+                    !callIdRef.current
+                ) {
                     return;
                 }
 
-                const candidates =
-                    pendingLocalIceCandidatesRef.current;
-
-                pendingLocalIceCandidatesRef.current =
-                    [];
-
-                for (
-                    let index = 0;
-                    index <
-                    candidates.length;
-                    index += 1
-                ) {
-                    const candidate =
-                        candidates[index];
-
-                    if (
-                        typeof candidate
-                            .candidate !==
-                        "string"
-                    ) {
-                        console.warn(
-                            "[WebRTC] Skipping invalid ICE candidate.",
-                        );
-
-                        continue;
-                    }
-
-                    const realtimeCandidate =
-                        toRealtimeIceCandidate(
-                            candidate,
-                        );
-
-                    const sent =
-                        realtimeClient.send({
-                            type: "ICE_CANDIDATE",
-                            callId:
-                                callIdValue,
-                            candidate:
-                                realtimeCandidate,
-                        });
-
-                    if (!sent) {
-                        pendingLocalIceCandidatesRef.current =
-                            candidates
-                                .slice(index)
-                                .concat(
-                                    pendingLocalIceCandidatesRef.current,
-                                );
-
-                        break;
-                    }
-                }
-            } catch (error) {
-                console.warn(
-                    "[WebRTC] ICE flush deferred:",
-                    error,
-                );
-            } finally {
                 flushingLocalIceRef.current =
-                    false;
-            }
-        }, [waitForRealtime]);
+                    true;
+
+                try {
+                    await waitForRealtime();
+
+                    const callIdValue =
+                        callIdRef.current;
+
+                    if (!callIdValue) {
+                        return;
+                    }
+
+                    const candidates =
+                        pendingLocalIceCandidatesRef.current;
+
+                    pendingLocalIceCandidatesRef.current =
+                        [];
+
+                    for (
+                        let index = 0;
+                        index <
+                        candidates.length;
+                        index += 1
+                    ) {
+                        const candidate =
+                            candidates[index];
+
+                        if (
+                            typeof candidate
+                                .candidate !==
+                            "string"
+                        ) {
+                            console.warn(
+                                "[WebRTC] Skipping invalid ICE candidate.",
+                            );
+
+                            continue;
+                        }
+
+                        const realtimeCandidate =
+                            toRealtimeIceCandidate(
+                                candidate,
+                            );
+
+                        const sent =
+                            realtimeClient.send({
+                                type: "ICE_CANDIDATE",
+                                callId:
+                                    callIdValue,
+                                candidate:
+                                    realtimeCandidate,
+                            });
+
+                        if (!sent) {
+                            pendingLocalIceCandidatesRef.current =
+                                candidates
+                                    .slice(
+                                        index,
+                                    )
+                                    .concat(
+                                        pendingLocalIceCandidatesRef.current,
+                                    );
+
+                            break;
+                        }
+                    }
+                } catch (error) {
+                    console.warn(
+                        "[WebRTC] ICE flush deferred:",
+                        error,
+                    );
+                } finally {
+                    flushingLocalIceRef.current =
+                        false;
+                }
+            },
+            [waitForRealtime],
+        );
 
     const sendSignalingEvent =
         useCallback(
@@ -732,7 +702,9 @@ export function useWebRTC({
                 await waitForRealtime();
 
                 const sent =
-                    realtimeClient.send(event);
+                    realtimeClient.send(
+                        event,
+                    );
 
                 if (!sent) {
                     throw new Error(
@@ -777,70 +749,73 @@ export function useWebRTC({
         );
 
     const loadIceConfig =
-        useCallback(async () => {
-            if (
-                iceConfigLoadedRef.current
-            ) {
-                return;
-            }
-
-            try {
-                const response =
-                    await getIceConfig();
-
-                const iceServers =
-                    response.data
-                        .iceServers as IceServerResponse[];
-
-                const servers: RTCIceServer[] =
-                    iceServers
-                        .filter(
-                            (
-                                server: IceServerResponse,
-                            ) =>
-                                Boolean(
-                                    server.urls,
-                                ),
-                        )
-                        .map(
-                            (
-                                server: IceServerResponse,
-                            ) => ({
-                                urls:
-                                    server.urls,
-
-                                ...(server.username
-                                    ? {
-                                          username:
-                                              server.username,
-                                      }
-                                    : {}),
-
-                                ...(server.credential
-                                    ? {
-                                          credential:
-                                              server.credential,
-                                      }
-                                    : {}),
-                            }),
-                        );
-
+        useCallback(
+            async () => {
                 if (
-                    servers.length > 0
+                    iceConfigLoadedRef.current
                 ) {
-                    iceServersRef.current =
-                        servers;
+                    return;
                 }
-            } catch (error) {
-                console.warn(
-                    "[WebRTC] ICE configuration unavailable; using STUN fallback.",
-                    error,
-                );
-            } finally {
-                iceConfigLoadedRef.current =
-                    true;
-            }
-        }, []);
+
+                try {
+                    const response =
+                        await getIceConfig();
+
+                    const iceServers =
+                        response.data
+                            .iceServers as IceServerResponse[];
+
+                    const servers: RTCIceServer[] =
+                        iceServers
+                            .filter(
+                                (
+                                    server: IceServerResponse,
+                                ) =>
+                                    Boolean(
+                                        server.urls,
+                                    ),
+                            )
+                            .map(
+                                (
+                                    server: IceServerResponse,
+                                ) => ({
+                                    urls:
+                                        server.urls,
+
+                                    ...(server.username
+                                        ? {
+                                              username:
+                                                  server.username,
+                                          }
+                                        : {}),
+
+                                    ...(server.credential
+                                        ? {
+                                              credential:
+                                                  server.credential,
+                                          }
+                                        : {}),
+                                }),
+                            );
+
+                    if (
+                        servers.length > 0
+                    ) {
+                        iceServersRef.current =
+                            servers;
+                    }
+                } catch (error) {
+                    console.warn(
+                        "[WebRTC] ICE configuration unavailable; using STUN fallback.",
+                        error,
+                    );
+                } finally {
+                    iceConfigLoadedRef.current =
+                        true;
+                }
+            },
+            [],
+        );
 
     const createPeerConnection =
         useCallback(() => {
@@ -852,10 +827,9 @@ export function useWebRTC({
             }
 
             const peer =
-                new RTCPeerConnection({
-                    iceServers:
-                        iceServersRef.current,
-                });
+                createPeerConnectionInstance(
+                    iceServersRef.current,
+                );
 
             peerConnectionRef.current =
                 peer;
@@ -870,80 +844,84 @@ export function useWebRTC({
                 incomingStream,
             );
 
-            peer.ontrack = (event) => {
-                /*
-                 * Always use the actual incoming WebRTC
-                 * track. Never use the local stream here.
-                 */
-                const tracks =
-                    event.streams.length > 0
-                        ? event.streams.flatMap(
-                              (
-                                  stream,
-                              ) =>
-                                  stream.getTracks(),
-                          )
-                        : [
-                              event.track,
-                          ];
+            peer.ontrack =
+                (event) => {
+                    /*
+                     * Always use the actual incoming
+                     * WebRTC track. Never use the
+                     * local stream here.
+                     */
+                    const tracks =
+                        event.streams.length >
+                        0
+                            ? event.streams.flatMap(
+                                  (
+                                      stream,
+                                  ) =>
+                                      stream.getTracks(),
+                              )
+                            : [
+                                  event.track,
+                              ];
 
-                for (const track of tracks) {
-                    if (
-                        !incomingStream.getTrackById(
-                            track.id,
-                        )
-                    ) {
-                        incomingStream.addTrack(
-                            track,
-                        );
+                    for (const track of tracks) {
+                        if (
+                            !incomingStream.getTrackById(
+                                track.id,
+                            )
+                        ) {
+                            incomingStream.addTrack(
+                                track,
+                            );
+                        }
                     }
-                }
 
-                const nextStream =
-                    new MediaStream(
-                        incomingStream.getTracks(),
+                    const nextStream =
+                        new MediaStream(
+                            incomingStream.getTracks(),
+                        );
+
+                    setRemoteStream(
+                        nextStream,
                     );
 
-                setRemoteStream(
-                    nextStream,
-                );
+                    const requiredKind =
+                        callTypeRef.current ===
+                        "video"
+                            ? "video"
+                            : "audio";
 
-                const requiredKind =
-                    callTypeRef.current ===
-                    "video"
-                        ? "video"
-                        : "audio";
+                    remoteMediaReadyRef.current =
+                        incomingStream
+                            .getTracks()
+                            .some(
+                                (
+                                    track,
+                                ) =>
+                                    track.kind ===
+                                    requiredKind,
+                            );
 
-                remoteMediaReadyRef.current =
-                    incomingStream
-                        .getTracks()
-                        .some(
-                            (track) =>
-                                track.kind ===
-                                requiredKind,
-                        );
+                    maybeReportConnected();
+                };
 
-                maybeReportConnected();
-            };
+            peer.onicecandidate =
+                (event) => {
+                    if (
+                        !event.candidate ||
+                        !callIdRef.current
+                    ) {
+                        return;
+                    }
 
-            peer.onicecandidate = (
-                event,
-            ) => {
-                if (
-                    !event.candidate ||
-                    !callIdRef.current
-                ) {
-                    return;
-                }
+                    pendingLocalIceCandidatesRef.current.push(
+                        toIceCandidateInit(
+                            event.candidate,
+                        ),
+                    );
 
-                pendingLocalIceCandidatesRef.current.push(
-                    toIceCandidateInit(
-                        event.candidate,
-                    ),
-                );
-
-                void flushLocalIceCandidates();
-            };
+                    void flushLocalIceCandidates();
+                };
 
             peer.onconnectionstatechange =
                 () => {
@@ -1024,221 +1002,158 @@ export function useWebRTC({
     /*
      * Acquire the local microphone/camera.
      *
-     * The browser receives the requested audio-processing
-     * constraints first. We then apply them directly to
-     * the microphone track as a second layer of protection
-     * for browsers/devices that expose the controls.
+     * The browser receives the requested
+     * audio-processing constraints first.
+     * The acquired audio tracks are then
+     * configured by the extracted WebRTC
+     * media utility.
      */
     const ensureLocalMedia =
-        useCallback(async () => {
-            if (
-                localStreamRef.current
-            ) {
-                return localStreamRef.current;
-            }
+        useCallback(
+            async () => {
+                if (
+                    localStreamRef.current
+                ) {
+                    return localStreamRef.current;
+                }
 
-            const type =
-                callTypeRef.current;
+                const type =
+                    callTypeRef.current;
 
-            if (!type) {
-                throw new Error(
-                    "Call type is unavailable.",
+                if (!type) {
+                    throw new Error(
+                        "Call type is unavailable.",
+                    );
+                }
+
+                if (
+                    !navigator.mediaDevices
+                        ?.getUserMedia
+                ) {
+                    throw new Error(
+                        "Camera and microphone are unavailable in this browser.",
+                    );
+                }
+
+                setConnectionState(
+                    "requesting-media",
                 );
-            }
 
-            if (
-                !navigator.mediaDevices
-                    ?.getUserMedia
-            ) {
-                throw new Error(
-                    "Camera and microphone are unavailable in this browser.",
-                );
-            }
+                try {
+                    const stream =
+                        await navigator.mediaDevices.getUserMedia(
+                            createMediaConstraints(
+                                type,
+                            ),
+                        );
 
-            setConnectionState(
-                "requesting-media",
-            );
-
-            try {
-                const stream =
-                    await navigator.mediaDevices.getUserMedia(
-                        createMediaConstraints(
-                            type,
-                        ),
+                    await configureAudioTracks(
+                        stream,
                     );
 
-                /*
-                 * Apply speech-focused microphone
-                 * processing directly to the acquired
-                 * audio tracks.
-                 */
-                const audioTracks =
-                    stream.getAudioTracks();
-
-                for (const track of audioTracks) {
-                    try {
-                        await track.applyConstraints(
-                            {
-                                echoCancellation:
-                                    true,
-
-                                noiseSuppression:
-                                    true,
-
-                                autoGainControl:
-                                    true,
-
-                                channelCount: {
-                                    ideal: 1,
-                                },
-                            },
+                    const audioSettings =
+                        getAudioDiagnostics(
+                            stream,
                         );
-                    } catch (error) {
-                        /*
-                         * Some devices expose the track
-                         * but do not support every
-                         * requested constraint.
-                         *
-                         * The stream is still usable,
-                         * so do not fail the call.
-                         */
-                        console.warn(
-                            "[WebRTC] Advanced microphone constraints unavailable:",
-                            error,
-                        );
-                    }
 
-                    /*
-                     * Tell the browser that this track
-                     * contains human speech.
-                     *
-                     * Older browsers may not expose
-                     * contentHint.
-                     */
+                    console.debug(
+                        "[WebRTC] Microphone settings:",
+                        {
+                            echoCancellation:
+                                audioSettings?.echoCancellation,
+
+                            noiseSuppression:
+                                audioSettings?.noiseSuppression,
+
+                            autoGainControl:
+                                audioSettings?.autoGainControl,
+
+                            channelCount:
+                                audioSettings?.channelCount,
+                        },
+                    );
+
+                    localStreamRef.current =
+                        stream;
+
+                    setLocalStream(
+                        stream,
+                    );
+
+                    isMutedRef.current =
+                        false;
+
+                    isCameraEnabledRef.current =
+                        type === "video";
+
+                    setIsMuted(
+                        false,
+                    );
+
+                    setIsCameraEnabled(
+                        type === "video",
+                    );
+
+                    return stream;
+                } catch (error) {
+                    const normalized =
+                        error instanceof
+                        Error
+                            ? error
+                            : new Error(
+                                  "Unable to access your camera or microphone.",
+                              );
+
                     if (
-                        "contentHint" in
-                        track
+                        normalized.name ===
+                        "NotReadableError"
                     ) {
-                        try {
-                            track.contentHint =
-                                "speech";
-                        } catch {
-                            // Optional browser optimization.
-                        }
+                        throw new Error(
+                            "Your camera or microphone is already being used by another application or browser tab.",
+                        );
                     }
+
+                    if (
+                        normalized.name ===
+                        "NotAllowedError"
+                    ) {
+                        throw new Error(
+                            "Camera and microphone permission was denied.",
+                        );
+                    }
+
+                    if (
+                        normalized.name ===
+                        "NotFoundError"
+                    ) {
+                        throw new Error(
+                            "No camera or microphone was found.",
+                        );
+                    }
+
+                    throw normalized;
                 }
-
-                /*
-                 * Diagnostic information.
-                 *
-                 * This reports what the browser actually
-                 * applied to the microphone track.
-                 *
-                 * It can be removed later once testing
-                 * is complete.
-                 */
-                const audioSettings =
-                    audioTracks[0]?.getSettings();
-
-                console.debug(
-                    "[WebRTC] Microphone settings:",
-                    {
-                        echoCancellation:
-                            audioSettings?.echoCancellation,
-
-                        noiseSuppression:
-                            audioSettings?.noiseSuppression,
-
-                        autoGainControl:
-                            audioSettings?.autoGainControl,
-
-                        channelCount:
-                            audioSettings?.channelCount,
-                    },
-                );
-
-                localStreamRef.current =
-                    stream;
-
-                setLocalStream(stream);
-
-                isMutedRef.current =
-                    false;
-
-                isCameraEnabledRef.current =
-                    type === "video";
-
-                setIsMuted(false);
-
-                setIsCameraEnabled(
-                    type === "video",
-                );
-
-                return stream;
-            } catch (error) {
-                const normalized =
-                    error instanceof Error
-                        ? error
-                        : new Error(
-                              "Unable to access your camera or microphone.",
-                          );
-
-                if (
-                    normalized.name ===
-                    "NotReadableError"
-                ) {
-                    throw new Error(
-                        "Your camera or microphone is already being used by another application or browser tab.",
-                    );
-                }
-
-                if (
-                    normalized.name ===
-                    "NotAllowedError"
-                ) {
-                    throw new Error(
-                        "Camera and microphone permission was denied.",
-                    );
-                }
-
-                if (
-                    normalized.name ===
-                    "NotFoundError"
-                ) {
-                    throw new Error(
-                        "No camera or microphone was found.",
-                    );
-                }
-
-                throw normalized;
-            }
-        }, []);
+            },
+            [],
+        );
 
     const addLocalTracks =
         useCallback(
-            async (
+            (
                 peer: RTCPeerConnection,
                 stream: MediaStream,
             ) => {
-                const senders =
-                    peer.getSenders();
+                const result =
+                    addLocalTracksToPeer(
+                        peer,
+                        stream,
+                    );
 
-                for (const track of stream.getTracks()) {
-                    const exists =
-                        senders.some(
-                            (sender) =>
-                                sender.track
-                                    ?.id ===
-                                track.id,
-                        );
+                videoSenderRef.current =
+                    result.videoSender;
 
-                    if (!exists) {
-                        peer.addTrack(
-                            track,
-                            stream,
-                        );
-                    }
-                }
+                audioSenderRef.current =
+                    result.audioSender;
             },
             [],
         );
@@ -1348,7 +1263,7 @@ export function useWebRTC({
                 const stream =
                     await ensureLocalMedia();
 
-                await addLocalTracks(
+                addLocalTracks(
                     peer,
                     stream,
                 );
@@ -1724,7 +1639,7 @@ export function useWebRTC({
                 const peer =
                     createPeerConnection();
 
-                await addLocalTracks(
+                addLocalTracks(
                     peer,
                     stream,
                 );
@@ -1796,7 +1711,7 @@ export function useWebRTC({
                 const peer =
                     createPeerConnection();
 
-                await addLocalTracks(
+                addLocalTracks(
                     peer,
                     stream,
                 );
@@ -1810,7 +1725,9 @@ export function useWebRTC({
                     isCameraEnabledRef.current,
                 );
 
-                await createOffer(peer);
+                await createOffer(
+                    peer,
+                );
             } catch (error) {
                 if (!cancelled) {
                     reportFailure(
@@ -1882,6 +1799,8 @@ export function useWebRTC({
 
         toggleMute,
         toggleCamera,
+
+        replaceVideoTrack,
 
         cleanup,
     };
