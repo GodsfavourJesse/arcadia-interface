@@ -7,7 +7,7 @@ import {
 
 import {
     searchUsers,
-} from "@/app/services/users.service";
+} from "@/app/services/users/users.service";
 
 import type {
     DiscoverableUser,

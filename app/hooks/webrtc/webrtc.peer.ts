@@ -4,6 +4,11 @@ export type WebRTCPeerContext = {
     audioSender: RTCRtpSender | null;
 };
 
+export type LocalTrackSenders = {
+    videoSender: RTCRtpSender | null;
+    audioSender: RTCRtpSender | null;
+};
+
 export function createPeerConnection(
     iceServers: RTCIceServer[],
 ): RTCPeerConnection {
@@ -17,10 +22,7 @@ export function createPeerConnection(
 export function addLocalTracks(
     peerConnection: RTCPeerConnection,
     stream: MediaStream,
-): {
-    videoSender: RTCRtpSender | null;
-    audioSender: RTCRtpSender | null;
-} {
+): LocalTrackSenders {
     let videoSender: RTCRtpSender | null = null;
     let audioSender: RTCRtpSender | null = null;
 

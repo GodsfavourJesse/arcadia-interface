@@ -1,6 +1,6 @@
 "use client";
 
-import { createDirectConversation } from "@/app/services/conversations.service";
+import { createDirectConversation } from "@/app/services/conversation/conversations.service";
 import type {
     ContactListItem,
 } from "@/app/types/users/users.types";

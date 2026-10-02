@@ -9,7 +9,7 @@ import {
 import {
     createDirectConversation,
     getConversations,
-} from "@/app/services/conversations.service";
+} from "@/app/services/conversation/conversations.service";
 
 import type {
     ConversationSummary,

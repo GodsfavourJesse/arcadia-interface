@@ -7,7 +7,7 @@ import {
 
 import {
     getConversation,
-} from "@/app/services/conversations.service";
+} from "@/app/services/conversation/conversations.service";
 
 import {
     useActiveCall,

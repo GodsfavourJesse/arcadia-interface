@@ -13,7 +13,7 @@ import {
 
 import {
     getIceConfig,
-} from "@/app/services/calls.service";
+} from "@/app/services/call/calls.service";
 
 import type {
     RealtimeWebRTCEvent,
@@ -134,6 +134,18 @@ export function useWebRTC({
 
     const remoteMediaReadyRef =
         useRef(false);
+
+    /*
+     * True when the active RTCPeerConnection has
+     * a video RTCRtpSender available.
+     *
+     * This is the capability consumed by the
+     * avatar media layer.
+     */
+    const [
+        isVideoSenderReady,
+        setIsVideoSenderReady,
+    ] = useState(false);
 
     const callIdRef =
         useRef(callId);
@@ -351,6 +363,16 @@ export function useWebRTC({
             [],
         );
 
+    /*
+     * Completely release the WebRTC call.
+     *
+     * This owns the physical camera/microphone
+     * because those tracks were acquired by
+     * useWebRTC().
+     *
+     * Avatar-owned MediaStreams are NOT stored here
+     * and therefore are not touched by this cleanup.
+     */
     const cleanup =
         useCallback(() => {
             const peer =
@@ -361,6 +383,10 @@ export function useWebRTC({
 
             videoSenderRef.current =
                 null;
+
+            setIsVideoSenderReady(
+                false,
+            );
 
             audioSenderRef.current =
                 null;
@@ -474,6 +500,9 @@ export function useWebRTC({
             );
         }, []);
 
+    /*
+     * Toggle microphone mute state.
+     */
     const toggleMute =
         useCallback(() => {
             const stream =
@@ -511,6 +540,13 @@ export function useWebRTC({
             );
         }, [sendMediaState]);
 
+    /*
+     * Toggle the physical camera track.
+     *
+     * This controls the camera source itself.
+     * It does not know whether WebRTC is currently
+     * sending the camera track or an avatar track.
+     */
     const toggleCamera =
         useCallback(() => {
             const stream =
@@ -552,22 +588,43 @@ export function useWebRTC({
      * Replace the video track already owned by
      * the active RTCRtpSender.
      *
-     * This intentionally does NOT:
+     * This is intentionally generic.
+     *
+     * It does NOT:
      * - create a new RTCPeerConnection
      * - add another track
-     * - create a new offer
-     * - create a new answer
+     * - create another offer
+     * - create another answer
      * - renegotiate the call
      *
-     * It is therefore suitable for switching between
-     * the physical camera track and the local avatar
-     * canvas track during an active call.
+     * This capability is consumed by higher-level
+     * media features such as the avatar media bridge.
      */
     const replaceVideoTrack =
         useCallback(
             async (
                 nextTrack: MediaStreamTrack | null,
             ): Promise<void> => {
+                const peer =
+                    peerConnectionRef.current;
+
+                if (!peer) {
+                    throw new Error(
+                        "WebRTC peer connection is not available.",
+                    );
+                }
+
+                if (
+                    peer.connectionState ===
+                        "closed" ||
+                    peer.connectionState ===
+                        "failed"
+                ) {
+                    throw new Error(
+                        "WebRTC peer connection is no longer active.",
+                    );
+                }
+
                 const sender =
                     videoSenderRef.current;
 
@@ -1151,6 +1208,10 @@ export function useWebRTC({
 
                 videoSenderRef.current =
                     result.videoSender;
+
+                setIsVideoSenderReady(
+                    result.videoSender !== null,
+                );
 
                 audioSenderRef.current =
                     result.audioSender;
@@ -1800,7 +1861,15 @@ export function useWebRTC({
         toggleMute,
         toggleCamera,
 
+        /*
+         * Generic WebRTC media replacement
+         * capability.
+         *
+         * Avatar media consumes this without
+         * WebRTC knowing anything about avatars.
+         */
         replaceVideoTrack,
+        isVideoSenderReady,
 
         cleanup,
     };

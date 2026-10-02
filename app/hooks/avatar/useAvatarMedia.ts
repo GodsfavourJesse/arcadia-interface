@@ -14,6 +14,7 @@ import {
 type UseAvatarMediaOptions = {
     cameraStream: MediaStream | null;
     enabled: boolean;
+    videoSenderReady: boolean;
     replaceVideoTrack: (
         track: MediaStreamTrack | null,
     ) => Promise<void>;
@@ -22,27 +23,20 @@ type UseAvatarMediaOptions = {
 export function useAvatarMedia({
     cameraStream,
     enabled,
+    videoSenderReady,
     replaceVideoTrack,
 }: UseAvatarMediaOptions) {
     const avatarCanvasRef =
-        useRef<HTMLCanvasElement | null>(
-            null,
-        );
+        useRef<HTMLCanvasElement | null>(null);
 
     const avatarStreamRef =
-        useRef<MediaStream | null>(
-            null,
-        );
+        useRef<MediaStream | null>(null);
 
     const avatarVideoTrackRef =
-        useRef<MediaStreamTrack | null>(
-            null,
-        );
+        useRef<MediaStreamTrack | null>(null);
 
     const cameraVideoTrackRef =
-        useRef<MediaStreamTrack | null>(
-            null,
-        );
+        useRef<MediaStreamTrack | null>(null);
 
     const switchingRef =
         useRef(false);
@@ -53,32 +47,22 @@ export function useAvatarMedia({
     const [
         avatarStream,
         setAvatarStream,
-    ] =
-        useState<MediaStream | null>(
-            null,
-        );
+    ] = useState<MediaStream | null>(null);
 
     const [
         avatarVideoTrack,
         setAvatarVideoTrack,
-    ] =
-        useState<MediaStreamTrack | null>(
-            null,
-        );
+    ] = useState<MediaStreamTrack | null>(null);
 
     const [
         isAvatarActive,
         setIsAvatarActive,
-    ] =
-        useState(false);
+    ] = useState(false);
 
     const [
         error,
         setError,
-    ] =
-        useState<string | null>(
-            null,
-        );
+    ] = useState<string | null>(null);
 
     /*
      * Mounted state.
@@ -94,11 +78,14 @@ export function useAvatarMedia({
     /*
      * Keep the current physical camera track
      * synchronized with cameraStream.
+     *
+     * The camera track is only referenced here.
+     * This hook never stops or owns the physical
+     * camera track.
      */
     useEffect(() => {
         const nextCameraTrack =
-            cameraStream?.getVideoTracks()[0] ??
-            null;
+            cameraStream?.getVideoTracks()[0] ?? null;
 
         const previousCameraTrack =
             cameraVideoTrackRef.current;
@@ -107,58 +94,56 @@ export function useAvatarMedia({
             nextCameraTrack;
 
         /*
-         * If the physical camera changed while
-         * avatar mode is active, the avatar itself
-         * remains the WebRTC source.
-         *
-         * The new camera track is simply stored as
-         * the track we will restore to when avatar
-         * mode is disabled.
+         * Avatar mode owns the WebRTC sender while
+         * active, so do not replace the sender with
+         * the camera when the camera stream changes.
+         */
+        if (isAvatarActive) {
+            return;
+        }
+
+        /*
+         * Nothing changed.
          */
         if (
-            previousCameraTrack &&
-            previousCameraTrack !==
-                nextCameraTrack &&
-            isAvatarActive
+            previousCameraTrack ===
+            nextCameraTrack
         ) {
             return;
         }
 
         /*
-         * If avatar mode is not active, the WebRTC
-         * sender should follow the current camera
-         * track when a stream replacement occurs.
-         *
-         * This is intentionally fire-and-forget;
-         * WebRTC owns the sender replacement.
+         * Do not race an explicit avatar
+         * enable/disable operation.
          */
-        if (
-            !isAvatarActive &&
-            previousCameraTrack !==
-                nextCameraTrack
-        ) {
-            void replaceVideoTrack(
-                nextCameraTrack,
-            ).catch((error) => {
-                console.error(
-                    "[Avatar] Failed to reconcile camera track:",
-                    error,
-                );
-
-                if (
-                    mountedRef.current
-                ) {
-                    setError(
-                        error instanceof Error
-                            ? error.message
-                            : "Unable to update camera video.",
-                    );
-                }
-            });
+        if (switchingRef.current) {
+            return;
         }
+
+        if (!videoSenderReady) {
+            return;
+        }
+
+        void replaceVideoTrack(
+            nextCameraTrack,
+        ).catch((error) => {
+            console.error(
+                "[Avatar] Failed to reconcile camera track:",
+                error,
+            );
+
+            if (mountedRef.current) {
+                setError(
+                    error instanceof Error
+                        ? error.message
+                        : "Unable to update camera video.",
+                );
+            }
+        });
     }, [
         cameraStream,
         isAvatarActive,
+        videoSenderReady,
         replaceVideoTrack,
     ]);
 
@@ -167,6 +152,11 @@ export function useAvatarMedia({
      * rendered avatar canvas.
      *
      * One canvas owns one capture stream.
+     *
+     * If AvatarCanvas switches from one avatar
+     * to another, the canvas itself remains the
+     * same, so the same MediaStream continues
+     * capturing the canvas.
      */
     const createAvatarStream =
         useCallback(
@@ -176,6 +166,10 @@ export function useAvatarMedia({
                 const existingStream =
                     avatarStreamRef.current;
 
+                /*
+                 * Reuse the existing capture stream
+                 * when the same canvas is supplied.
+                 */
                 if (
                     existingStream &&
                     avatarCanvasRef.current ===
@@ -185,7 +179,7 @@ export function useAvatarMedia({
                 }
 
                 /*
-                 * A new canvas means the previous
+                 * A different canvas means the old
                  * capture stream is no longer needed.
                  */
                 if (
@@ -196,8 +190,14 @@ export function useAvatarMedia({
                     existingStream
                         .getTracks()
                         .forEach(
-                            (track) =>
-                                track.stop(),
+                            (track) => {
+                                if (
+                                    track.readyState !==
+                                    "ended"
+                                ) {
+                                    track.stop();
+                                }
+                            },
                         );
 
                     avatarStreamRef.current =
@@ -220,8 +220,14 @@ export function useAvatarMedia({
                     stream
                         .getTracks()
                         .forEach(
-                            (track) =>
-                                track.stop(),
+                            (track) => {
+                                if (
+                                    track.readyState !==
+                                    "ended"
+                                ) {
+                                    track.stop();
+                                }
+                            },
                         );
 
                     throw new Error(
@@ -241,9 +247,7 @@ export function useAvatarMedia({
                 avatarVideoTrackRef.current =
                     videoTrack;
 
-                if (
-                    mountedRef.current
-                ) {
+                if (mountedRef.current) {
                     setAvatarStream(
                         stream,
                     );
@@ -259,8 +263,8 @@ export function useAvatarMedia({
         );
 
     /*
-     * AvatarCanvas calls this after creating
-     * its WebGL canvas.
+     * AvatarCanvas calls this when its persistent
+     * canvas is ready.
      */
     const handleAvatarCanvasReady =
         useCallback(
@@ -275,8 +279,7 @@ export function useAvatarMedia({
                     );
                 } catch (error) {
                     const normalized =
-                        error instanceof
-                        Error
+                        error instanceof Error
                             ? error
                             : new Error(
                                   "Unable to initialize avatar video.",
@@ -318,12 +321,27 @@ export function useAvatarMedia({
                     );
                 }
 
+                if (!videoSenderReady) {
+                    throw new Error(
+                        "WebRTC video is not ready yet.",
+                    );
+                }
+
                 const cameraTrack =
                     cameraVideoTrackRef.current;
 
                 if (!cameraTrack) {
                     throw new Error(
                         "Camera video track is unavailable.",
+                    );
+                }
+
+                if (
+                    cameraTrack.readyState ===
+                    "ended"
+                ) {
+                    throw new Error(
+                        "Camera video track has ended.",
                     );
                 }
 
@@ -360,13 +378,10 @@ export function useAvatarMedia({
                     }
 
                     setError(null);
-                    setIsAvatarActive(
-                        true,
-                    );
+                    setIsAvatarActive(true);
                 } catch (error) {
                     const normalized =
-                        error instanceof
-                        Error
+                        error instanceof Error
                             ? error
                             : new Error(
                                   "Unable to activate avatar video.",
@@ -394,6 +409,7 @@ export function useAvatarMedia({
             [
                 enabled,
                 isAvatarActive,
+                videoSenderReady,
                 replaceVideoTrack,
             ],
         );
@@ -409,6 +425,12 @@ export function useAvatarMedia({
                     !isAvatarActive
                 ) {
                     return;
+                }
+
+                if (!videoSenderReady) {
+                    throw new Error(
+                        "WebRTC video is not ready yet.",
+                    );
                 }
 
                 const cameraTrack =
@@ -444,13 +466,10 @@ export function useAvatarMedia({
                     }
 
                     setError(null);
-                    setIsAvatarActive(
-                        false,
-                    );
+                    setIsAvatarActive(false);
                 } catch (error) {
                     const normalized =
-                        error instanceof
-                        Error
+                        error instanceof Error
                             ? error
                             : new Error(
                                   "Unable to restore camera video.",
@@ -477,6 +496,7 @@ export function useAvatarMedia({
             },
             [
                 isAvatarActive,
+                videoSenderReady,
                 replaceVideoTrack,
             ],
         );
@@ -502,7 +522,8 @@ export function useAvatarMedia({
         );
 
     /*
-     * External avatar disable.
+     * If avatar mode becomes unavailable while
+     * active, restore the physical camera.
      */
     useEffect(() => {
         if (
@@ -528,10 +549,12 @@ export function useAvatarMedia({
 
     /*
      * If the physical camera disappears while
-     * avatar mode is active, do not stop the
-     * avatar stream. However, avatar mode can
-     * no longer be meaningfully driven by the
-     * camera, so expose the error.
+     * avatar mode is active, keep the avatar
+     * capture stream alive.
+     *
+     * Face tracking itself will stop because
+     * useFaceTracking no longer has a camera
+     * stream.
      */
     useEffect(() => {
         if (
@@ -552,8 +575,11 @@ export function useAvatarMedia({
     /*
      * Destroy only avatar-owned media.
      *
+     * IMPORTANT:
+     * Never stop cameraVideoTrackRef here.
+     *
      * The physical camera belongs to useWebRTC()
-     * and must never be stopped here.
+     * or the camera/media acquisition layer.
      */
     useEffect(() => {
         return () => {
@@ -582,6 +608,12 @@ export function useAvatarMedia({
                             }
                         },
                     );
+            }
+
+            if (mountedRef.current) {
+                setAvatarStream(null);
+                setAvatarVideoTrack(null);
+                setIsAvatarActive(false);
             }
         };
     }, []);

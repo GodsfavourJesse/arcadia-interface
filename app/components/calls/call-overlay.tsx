@@ -3,6 +3,7 @@
 import {
     useCallback,
     useEffect,
+    useMemo,
     useRef,
     useState,
     type ReactNode,
@@ -10,7 +11,7 @@ import {
 
 import {
     getConversation,
-} from "@/app/services/conversations.service";
+} from "@/app/services/conversation/conversations.service";
 
 import {
     useActiveCall,
@@ -51,7 +52,8 @@ import {
 
 import {
     AvatarPreview,
-} from "./avatar/avatar-preview";
+} from "../avatar/avatar-preview";
+import { AVATAR_RENDER_MODE, AVATAR_TYPE, AvatarDefinition } from "@/app/types/avatar/avatar.types";
 
 type Profile = {
     displayName: string;
@@ -453,6 +455,7 @@ export function CallOverlay() {
         toggleMute,
         toggleCamera,
         replaceVideoTrack,
+        isVideoSenderReady,
     } = useWebRTC({
         callId:
             activeCall?.id ?? null,
@@ -472,9 +475,27 @@ export function CallOverlay() {
         },
     });
 
-    const avatarModelUrl =
-        process.env.NEXT_PUBLIC_MIYOR_AVATAR_MODEL_URL ??
-        "/avatars/default-avatar.vrm";
+    const avatar = useMemo<AvatarDefinition>(
+        () => ({
+            id: "default-avatar",
+            name: "Default Avatar",
+            type: AVATAR_TYPE.VRM,
+            renderMode: AVATAR_RENDER_MODE.VRM,
+            thumbnailUrl: "",
+            assetUrl:
+                process.env
+                    .NEXT_PUBLIC_MIYOR_AVATAR_MODEL_URL ??
+                "/avatars/default-avatar.vrm",
+            enabled: true,
+            capabilities: {
+                headTracking: true,
+                eyeTracking: true,
+                mouthTracking: true,
+                facialExpressions: true,
+            },
+        }),
+        [],
+    );
 
     const {
         avatarVideoTrack,
@@ -490,6 +511,7 @@ export function CallOverlay() {
             isAccepted &&
             isConnected &&
             isCameraEnabled,
+        videoSenderReady: isVideoSenderReady,
         replaceVideoTrack,
     });
 
@@ -823,13 +845,10 @@ export function CallOverlay() {
                         >
                             {isAvatarActive ? (
                                 <AvatarPreview
-                                    cameraStream={
-                                        localStream
-                                    }
-                                    modelUrl={
-                                        avatarModelUrl
-                                    }
+                                    cameraStream={localStream}
+                                    avatar={avatar}
                                     trackingEnabled
+                                    active
                                     onAvatarCanvasReady={
                                         handleAvatarCanvasReady
                                     }

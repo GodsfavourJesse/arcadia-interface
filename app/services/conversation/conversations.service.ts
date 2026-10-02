@@ -1,4 +1,4 @@
-import { apiRequest } from "../lib/client";
+import { apiRequest } from "../../lib/client";
 
 import type {
     ConversationResponse,

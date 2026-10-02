@@ -11,7 +11,7 @@ import {
     deleteContact,
     getContacts,
     updateContact,
-} from "@/app/services/contacts.service";
+} from "@/app/services/contact/contacts.service";
 
 import type {
     ContactListItem,

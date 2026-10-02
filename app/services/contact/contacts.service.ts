@@ -1,10 +1,10 @@
-import { apiRequest } from "../lib/client";
+import { apiRequest } from "../../lib/client";
 import type {
     ContactResponse,
     ContactsResponse,
     CreateContactInput,
     UpdateContactInput,
-} from "../types/users/users.types";
+} from "../../types/users/users.types";
 
 export async function getContacts(
     status?: string,

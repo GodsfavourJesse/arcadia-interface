@@ -1,7 +1,7 @@
-import { apiRequest } from "../lib/client";
+import { apiRequest } from "../../lib/client";
 import type {
     UserSearchResponse,
-} from "../types/users/users.types";
+} from "../../types/users/users.types";
 
 export async function searchUsers(
     query: string,

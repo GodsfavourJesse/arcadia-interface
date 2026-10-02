@@ -10,7 +10,7 @@ import {
     failCall as failCallRequest,
     getCall as getCallRequest,
     listCalls as listCallsRequest,
-} from "@/app/services/calls.service";
+} from "@/app/services/call/calls.service";
 
 import { ApiRequestError } from "@/app/lib/client";
 
