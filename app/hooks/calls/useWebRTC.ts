@@ -65,22 +65,49 @@ const DEFAULT_ICE_SERVERS: RTCConfiguration = {
     ],
 };
 
+/*
+ * Microphone/camera capture configuration.
+ *
+ * Audio processing is requested from the browser so that
+ * WebRTC can use the device/browser's native:
+ *
+ * - Echo cancellation
+ * - Noise suppression
+ * - Automatic gain control
+ *
+ * Mono is preferred because Miyor is transmitting speech,
+ * not music or stereo content.
+ */
 function createMediaConstraints(
     callType: CallType,
 ): MediaStreamConstraints {
+    const audio: MediaTrackConstraints = {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+
+        channelCount: {
+            ideal: 1,
+        },
+    };
+
     if (callType === "video") {
         return {
-            audio: true,
+            audio,
+
             video: {
                 facingMode: "user",
+
                 width: {
                     ideal: 1280,
                     max: 1920,
                 },
+
                 height: {
                     ideal: 720,
                     max: 1080,
                 },
+
                 frameRate: {
                     ideal: 30,
                     max: 30,
@@ -90,7 +117,7 @@ function createMediaConstraints(
     }
 
     return {
-        audio: true,
+        audio,
         video: false,
     };
 }
@@ -103,6 +130,7 @@ function toIceCandidateInit(
         sdpMid: candidate.sdpMid,
         sdpMLineIndex:
             candidate.sdpMLineIndex,
+
         ...(candidate.usernameFragment !==
         undefined
             ? {
@@ -131,6 +159,7 @@ function toRealtimeIceCandidate(
             candidate.sdpMid ?? null,
         sdpMLineIndex:
             candidate.sdpMLineIndex ?? null,
+
         ...(candidate.usernameFragment !==
         undefined
             ? {
@@ -150,21 +179,28 @@ export function useWebRTC({
     onFailed,
 }: UseWebRTCOptions) {
     const peerConnectionRef =
-        useRef<RTCPeerConnection | null>(null);
+        useRef<RTCPeerConnection | null>(
+            null,
+        );
 
     const iceServersRef =
         useRef<RTCIceServer[]>(
-            DEFAULT_ICE_SERVERS.iceServers ?? [],
+            DEFAULT_ICE_SERVERS.iceServers ??
+                [],
         );
 
     const iceConfigLoadedRef =
         useRef(false);
 
     const localStreamRef =
-        useRef<MediaStream | null>(null);
+        useRef<MediaStream | null>(
+            null,
+        );
 
     const remoteStreamRef =
-        useRef<MediaStream | null>(null);
+        useRef<MediaStream | null>(
+            null,
+        );
 
     const pendingIceCandidatesRef =
         useRef<RTCIceCandidateInit[]>([]);
@@ -176,10 +212,12 @@ export function useWebRTC({
         useRef(false);
 
     const pendingOfferRef =
-        useRef<Extract<
-            RealtimeWebRTCEvent,
-            { type: "OFFER" }
-        > | null>(null);
+        useRef<
+            Extract<
+                RealtimeWebRTCEvent,
+                { type: "OFFER" }
+            > | null
+        >(null);
 
     const negotiationStartedRef =
         useRef(false);
@@ -215,15 +253,24 @@ export function useWebRTC({
         useRef(false);
 
     const isCameraEnabledRef =
-        useRef(callType === "video");
+        useRef(
+            callType === "video",
+        );
 
     const [localStream, setLocalStream] =
-        useState<MediaStream | null>(null);
+        useState<MediaStream | null>(
+            null,
+        );
 
     const [remoteStream, setRemoteStream] =
-        useState<MediaStream | null>(null);
+        useState<MediaStream | null>(
+            null,
+        );
 
-    const [connectionState, setConnectionState] =
+    const [
+        connectionState,
+        setConnectionState,
+    ] =
         useState<WebRTCConnectionState>(
             "idle",
         );
@@ -231,19 +278,32 @@ export function useWebRTC({
     const [isMuted, setIsMuted] =
         useState(false);
 
-    const [isCameraEnabled, setIsCameraEnabled] =
-        useState(callType === "video");
+    const [
+        isCameraEnabled,
+        setIsCameraEnabled,
+    ] =
+        useState(
+            callType === "video",
+        );
 
-    const [remoteAudioEnabled, setRemoteAudioEnabled] =
+    const [
+        remoteAudioEnabled,
+        setRemoteAudioEnabled,
+    ] =
         useState(true);
 
-    const [remoteVideoEnabled, setRemoteVideoEnabled] =
+    const [
+        remoteVideoEnabled,
+        setRemoteVideoEnabled,
+    ] =
         useState(
             callType === "video",
         );
 
     const [error, setError] =
-        useState<string | null>(null);
+        useState<string | null>(
+            null,
+        );
 
     useEffect(() => {
         callIdRef.current = callId;
@@ -262,11 +322,13 @@ export function useWebRTC({
     }, [enabled]);
 
     useEffect(() => {
-        onConnectedRef.current = onConnected;
+        onConnectedRef.current =
+            onConnected;
     }, [onConnected]);
 
     useEffect(() => {
-        onFailedRef.current = onFailed;
+        onFailedRef.current =
+            onFailed;
     }, [onFailed]);
 
     useEffect(() => {
@@ -279,26 +341,35 @@ export function useWebRTC({
     }, [isCameraEnabled]);
 
     const reportFailure =
-        useCallback((unknownError: unknown) => {
-            const normalized =
-                unknownError instanceof Error
-                    ? unknownError
-                    : new Error(
-                          "Unable to connect the call.",
-                      );
+        useCallback(
+            (unknownError: unknown) => {
+                const normalized =
+                    unknownError instanceof
+                    Error
+                        ? unknownError
+                        : new Error(
+                              "Unable to connect the call.",
+                          );
 
-            console.error(
-                "[WebRTC] Failure:",
-                normalized,
-            );
+                console.error(
+                    "[WebRTC] Failure:",
+                    normalized,
+                );
 
-            setError(normalized.message);
-            setConnectionState("failed");
+                setError(
+                    normalized.message,
+                );
 
-            onFailedRef.current?.(
-                normalized,
-            );
-        }, []);
+                setConnectionState(
+                    "failed",
+                );
+
+                onFailedRef.current?.(
+                    normalized,
+                );
+            },
+            [],
+        );
 
     const maybeReportConnected =
         useCallback(() => {
@@ -321,12 +392,11 @@ export function useWebRTC({
         }, []);
 
     /*
-     * Send the current local microphone/camera
-     * state to the remote participant.
+     * Send local microphone/camera state to the
+     * remote participant.
      *
-     * The actual media continues to travel directly
-     * through WebRTC. This event is only for UI/state
-     * synchronization.
+     * Media itself continues to travel through WebRTC.
+     * This message only synchronizes UI state.
      */
     const sendMediaState =
         useCallback(
@@ -372,156 +442,186 @@ export function useWebRTC({
             [],
         );
 
-    const cleanup = useCallback(() => {
-        const peer =
-            peerConnectionRef.current;
+    const cleanup =
+        useCallback(() => {
+            const peer =
+                peerConnectionRef.current;
 
-        peerConnectionRef.current = null;
-
-        if (peer) {
-            peer.onicecandidate = null;
-            peer.ontrack = null;
-            peer.onconnectionstatechange =
-                null;
-            peer.oniceconnectionstatechange =
-                null;
-            peer.onicegatheringstatechange =
+            peerConnectionRef.current =
                 null;
 
-            try {
-                peer.close();
-            } catch {
-                // Already closed.
+            if (peer) {
+                peer.onicecandidate =
+                    null;
+
+                peer.ontrack = null;
+
+                peer.onconnectionstatechange =
+                    null;
+
+                peer.oniceconnectionstatechange =
+                    null;
+
+                peer.onicegatheringstatechange =
+                    null;
+
+                try {
+                    peer.close();
+                } catch {
+                    // Already closed.
+                }
             }
-        }
 
-        const stream =
-            localStreamRef.current;
+            const stream =
+                localStreamRef.current;
 
-        localStreamRef.current = null;
+            localStreamRef.current =
+                null;
 
-        if (stream) {
-            for (const track of stream.getTracks()) {
-                track.stop();
+            if (stream) {
+                for (const track of stream.getTracks()) {
+                    track.stop();
+                }
             }
-        }
 
-        remoteStreamRef.current = null;
+            remoteStreamRef.current =
+                null;
 
-        pendingIceCandidatesRef.current = [];
-        pendingLocalIceCandidatesRef.current =
-            [];
-        pendingOfferRef.current = null;
+            pendingIceCandidatesRef.current =
+                [];
 
-        negotiationStartedRef.current =
-            false;
-        connectedReportedRef.current =
-            false;
-        peerConnectedRef.current = false;
-        remoteMediaReadyRef.current =
-            false;
-        flushingLocalIceRef.current =
-            false;
-        iceConfigLoadedRef.current =
-            false;
+            pendingLocalIceCandidatesRef.current =
+                [];
 
-        iceServersRef.current =
-            DEFAULT_ICE_SERVERS.iceServers ?? [];
+            pendingOfferRef.current =
+                null;
 
-        isMutedRef.current = false;
+            negotiationStartedRef.current =
+                false;
 
-        isCameraEnabledRef.current =
-            callTypeRef.current ===
-            "video";
+            connectedReportedRef.current =
+                false;
 
-        setLocalStream(null);
-        setRemoteStream(null);
-        setConnectionState("idle");
-        setError(null);
-        setIsMuted(false);
+            peerConnectedRef.current =
+                false;
 
-        setIsCameraEnabled(
-            callTypeRef.current ===
-                "video",
-        );
+            remoteMediaReadyRef.current =
+                false;
 
-        setRemoteAudioEnabled(true);
+            flushingLocalIceRef.current =
+                false;
 
-        setRemoteVideoEnabled(
-            callTypeRef.current ===
-                "video",
-        );
-    }, []);
+            iceConfigLoadedRef.current =
+                false;
 
-    const toggleMute = useCallback(() => {
-        const stream =
-            localStreamRef.current;
+            iceServersRef.current =
+                DEFAULT_ICE_SERVERS.iceServers ??
+                [];
 
-        if (!stream) {
-            return;
-        }
+            isMutedRef.current =
+                false;
 
-        const tracks =
-            stream.getAudioTracks();
+            isCameraEnabledRef.current =
+                callTypeRef.current ===
+                "video";
 
-        if (!tracks.length) {
-            return;
-        }
+            setLocalStream(null);
+            setRemoteStream(null);
 
-        const nextMuted =
-            !isMutedRef.current;
+            setConnectionState(
+                "idle",
+            );
 
-        for (const track of tracks) {
-            track.enabled =
-                !nextMuted;
-        }
+            setError(null);
 
-        isMutedRef.current =
-            nextMuted;
+            setIsMuted(false);
 
-        setIsMuted(nextMuted);
+            setIsCameraEnabled(
+                callTypeRef.current ===
+                    "video",
+            );
 
-        void sendMediaState(
-            !nextMuted,
-            isCameraEnabledRef.current,
-        );
-    }, [sendMediaState]);
+            setRemoteAudioEnabled(
+                true,
+            );
 
-    const toggleCamera = useCallback(() => {
-        const stream =
-            localStreamRef.current;
+            setRemoteVideoEnabled(
+                callTypeRef.current ===
+                    "video",
+            );
+        }, []);
 
-        if (!stream) {
-            return;
-        }
+    const toggleMute =
+        useCallback(() => {
+            const stream =
+                localStreamRef.current;
 
-        const tracks =
-            stream.getVideoTracks();
+            if (!stream) {
+                return;
+            }
 
-        if (!tracks.length) {
-            return;
-        }
+            const tracks =
+                stream.getAudioTracks();
 
-        const nextEnabled =
-            !isCameraEnabledRef.current;
+            if (!tracks.length) {
+                return;
+            }
 
-        for (const track of tracks) {
-            track.enabled =
+            const nextMuted =
+                !isMutedRef.current;
+
+            for (const track of tracks) {
+                track.enabled =
+                    !nextMuted;
+            }
+
+            isMutedRef.current =
+                nextMuted;
+
+            setIsMuted(nextMuted);
+
+            void sendMediaState(
+                !nextMuted,
+                isCameraEnabledRef.current,
+            );
+        }, [sendMediaState]);
+
+    const toggleCamera =
+        useCallback(() => {
+            const stream =
+                localStreamRef.current;
+
+            if (!stream) {
+                return;
+            }
+
+            const tracks =
+                stream.getVideoTracks();
+
+            if (!tracks.length) {
+                return;
+            }
+
+            const nextEnabled =
+                !isCameraEnabledRef.current;
+
+            for (const track of tracks) {
+                track.enabled =
+                    nextEnabled;
+            }
+
+            isCameraEnabledRef.current =
                 nextEnabled;
-        }
 
-        isCameraEnabledRef.current =
-            nextEnabled;
+            setIsCameraEnabled(
+                nextEnabled,
+            );
 
-        setIsCameraEnabled(
-            nextEnabled,
-        );
-
-        void sendMediaState(
-            !isMutedRef.current,
-            nextEnabled,
-        );
-    }, [sendMediaState]);
+            void sendMediaState(
+                !isMutedRef.current,
+                nextEnabled,
+            );
+        }, [sendMediaState]);
 
     const waitForRealtime =
         useCallback(async () => {
@@ -541,8 +641,8 @@ export function useWebRTC({
         useCallback(async () => {
             if (
                 flushingLocalIceRef.current ||
-                pendingLocalIceCandidatesRef.current
-                    .length === 0 ||
+                pendingLocalIceCandidatesRef
+                    .current.length === 0 ||
                 !callIdRef.current
             ) {
                 return;
@@ -648,7 +748,9 @@ export function useWebRTC({
             async (
                 peer: RTCPeerConnection,
             ) => {
-                if (!peer.remoteDescription) {
+                if (
+                    !peer.remoteDescription
+                ) {
                     return;
                 }
 
@@ -676,7 +778,9 @@ export function useWebRTC({
 
     const loadIceConfig =
         useCallback(async () => {
-            if (iceConfigLoadedRef.current) {
+            if (
+                iceConfigLoadedRef.current
+            ) {
                 return;
             }
 
@@ -769,7 +873,7 @@ export function useWebRTC({
             peer.ontrack = (event) => {
                 /*
                  * Always use the actual incoming WebRTC
-                 * track. Do not use the local stream here.
+                 * track. Never use the local stream here.
                  */
                 const tracks =
                     event.streams.length > 0
@@ -822,7 +926,9 @@ export function useWebRTC({
                 maybeReportConnected();
             };
 
-            peer.onicecandidate = (event) => {
+            peer.onicecandidate = (
+                event,
+            ) => {
                 if (
                     !event.candidate ||
                     !callIdRef.current
@@ -915,6 +1021,14 @@ export function useWebRTC({
             maybeReportConnected,
         ]);
 
+    /*
+     * Acquire the local microphone/camera.
+     *
+     * The browser receives the requested audio-processing
+     * constraints first. We then apply them directly to
+     * the microphone track as a second layer of protection
+     * for browsers/devices that expose the controls.
+     */
     const ensureLocalMedia =
         useCallback(async () => {
             if (
@@ -952,6 +1066,96 @@ export function useWebRTC({
                             type,
                         ),
                     );
+
+                /*
+                 * Apply speech-focused microphone
+                 * processing directly to the acquired
+                 * audio tracks.
+                 */
+                const audioTracks =
+                    stream.getAudioTracks();
+
+                for (const track of audioTracks) {
+                    try {
+                        await track.applyConstraints(
+                            {
+                                echoCancellation:
+                                    true,
+
+                                noiseSuppression:
+                                    true,
+
+                                autoGainControl:
+                                    true,
+
+                                channelCount: {
+                                    ideal: 1,
+                                },
+                            },
+                        );
+                    } catch (error) {
+                        /*
+                         * Some devices expose the track
+                         * but do not support every
+                         * requested constraint.
+                         *
+                         * The stream is still usable,
+                         * so do not fail the call.
+                         */
+                        console.warn(
+                            "[WebRTC] Advanced microphone constraints unavailable:",
+                            error,
+                        );
+                    }
+
+                    /*
+                     * Tell the browser that this track
+                     * contains human speech.
+                     *
+                     * Older browsers may not expose
+                     * contentHint.
+                     */
+                    if (
+                        "contentHint" in
+                        track
+                    ) {
+                        try {
+                            track.contentHint =
+                                "speech";
+                        } catch {
+                            // Optional browser optimization.
+                        }
+                    }
+                }
+
+                /*
+                 * Diagnostic information.
+                 *
+                 * This reports what the browser actually
+                 * applied to the microphone track.
+                 *
+                 * It can be removed later once testing
+                 * is complete.
+                 */
+                const audioSettings =
+                    audioTracks[0]?.getSettings();
+
+                console.debug(
+                    "[WebRTC] Microphone settings:",
+                    {
+                        echoCancellation:
+                            audioSettings?.echoCancellation,
+
+                        noiseSuppression:
+                            audioSettings?.noiseSuppression,
+
+                        autoGainControl:
+                            audioSettings?.autoGainControl,
+
+                        channelCount:
+                            audioSettings?.channelCount,
+                    },
+                );
 
                 localStreamRef.current =
                     stream;
@@ -1149,10 +1353,12 @@ export function useWebRTC({
                     stream,
                 );
 
-                await peer.setRemoteDescription({
-                    type: "offer",
-                    sdp: event.sdp,
-                });
+                await peer.setRemoteDescription(
+                    {
+                        type: "offer",
+                        sdp: event.sdp,
+                    },
+                );
 
                 await addPendingIceCandidates(
                     peer,
@@ -1221,10 +1427,12 @@ export function useWebRTC({
                     return;
                 }
 
-                await peer.setRemoteDescription({
-                    type: "answer",
-                    sdp: event.sdp,
-                });
+                await peer.setRemoteDescription(
+                    {
+                        type: "answer",
+                        sdp: event.sdp,
+                    },
+                );
 
                 await addPendingIceCandidates(
                     peer,
@@ -1286,7 +1494,8 @@ export function useWebRTC({
         );
 
     /*
-     * Subscribe to WebRTC signaling and remote media state.
+     * Subscribe to WebRTC signaling and
+     * remote media state.
      */
     useEffect(() => {
         if (
@@ -1378,8 +1587,8 @@ export function useWebRTC({
     ]);
 
     /*
-     * Retry local ICE and renegotiate after the shared
-     * realtime socket reconnects.
+     * Retry local ICE and renegotiate after
+     * the shared realtime socket reconnects.
      */
     useEffect(() => {
         if (
@@ -1401,9 +1610,8 @@ export function useWebRTC({
                     void flushLocalIceCandidates();
 
                     /*
-                     * Re-send current media state after
-                     * reconnect so the remote UI can
-                     * recover its state.
+                     * Re-send current media state
+                     * after reconnect.
                      */
                     void sendMediaState(
                         !isMutedRef.current,
@@ -1451,8 +1659,8 @@ export function useWebRTC({
     ]);
 
     /*
-     * Process an offer that arrived before ACCEPTED
-     * was applied locally.
+     * Process an offer that arrived before
+     * ACCEPTED was applied locally.
      */
     useEffect(() => {
         if (
@@ -1471,7 +1679,8 @@ export function useWebRTC({
             return;
         }
 
-        pendingOfferRef.current = null;
+        pendingOfferRef.current =
+            null;
 
         void handleOffer(
             queuedOffer,
@@ -1486,8 +1695,8 @@ export function useWebRTC({
     ]);
 
     /*
-     * Callee prepares microphone/camera immediately
-     * after accepting.
+     * Callee prepares microphone/camera
+     * immediately after accepting.
      */
     useEffect(() => {
         if (
@@ -1558,8 +1767,8 @@ export function useWebRTC({
     ]);
 
     /*
-     * Caller prepares local media and creates the offer
-     * as soon as the callee accepts.
+     * Caller prepares local media and creates
+     * the offer as soon as the callee accepts.
      */
     useEffect(() => {
         if (
