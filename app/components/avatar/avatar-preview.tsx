@@ -3,6 +3,7 @@
 import {
     useCallback,
     useEffect,
+    useRef,
     useState,
     type ReactNode,
 } from "react";
@@ -13,6 +14,7 @@ import { useFaceTracking } from "@/app/hooks/avatar/useFaceTracking";
 
 import type {
     AvatarDefinition,
+    AvatarTrackingState,
 } from "@/app/types/avatar/avatar.types";
 
 type AvatarPreviewProps = {
@@ -93,6 +95,13 @@ export function AvatarPreview({
             avatar !== null,
     });
 
+    const trackingRef =
+        useRef<AvatarTrackingState>(tracking);
+
+    useEffect(() => {
+        trackingRef.current = tracking;
+    }, [tracking]);
+
     /*
      * Keep the canvas callback stable.
      *
@@ -167,7 +176,7 @@ export function AvatarPreview({
                 {avatar ? (
                     <AvatarCanvas
                         avatar={avatar}
-                        tracking={tracking}
+                        trackingRef={trackingRef}
                         onCanvasReady={
                             handleAvatarCanvasReady
                         }
