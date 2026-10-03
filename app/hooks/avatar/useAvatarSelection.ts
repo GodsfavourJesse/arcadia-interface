@@ -2,7 +2,9 @@
 
 import {
     useCallback,
+    useEffect,
     useMemo,
+    useRef,
     useState,
 } from "react";
 
@@ -61,6 +63,67 @@ export function useAvatarSelection({
     ] = useState<AvatarDefinition | null>(
         initialAvatar,
     );
+
+    /*
+     * `initialAvatarId` is a controlled input from callers such as
+     * CallOverlay. CallOverlay exists before a call starts, so its first
+     * render normally has no local avatar and this hook initializes with
+     * the default VRM. When a call is then started, the call store updates
+     * `localAvatarId`, but the old implementation never synchronized that
+     * new value into `selectedAvatar`.
+     *
+     * That made the call continue rendering `default-vrm` even though the
+     * uploaded avatar was correctly stored in the call state.
+     *
+     * Only react to a change of the external initial-avatar id. This keeps
+     * normal user selection intact after initialization.
+     */
+    const previousInitialAvatarIdRef =
+        useRef<string | null | undefined>(
+            initialAvatarId,
+        );
+
+    useEffect(() => {
+        if (
+            previousInitialAvatarIdRef.current ===
+            initialAvatarId
+        ) {
+            return;
+        }
+
+        previousInitialAvatarIdRef.current =
+            initialAvatarId;
+
+        if (initialAvatarId) {
+            const nextAvatar = avatars.find(
+                (avatar) =>
+                    avatar.id === initialAvatarId,
+            );
+
+            if (nextAvatar) {
+                console.log(
+                    "[AvatarSelection] External avatar selection applied",
+                    {
+                        id: nextAvatar.id,
+                        name: nextAvatar.name,
+                        type: nextAvatar.type,
+                        renderMode: nextAvatar.renderMode,
+                    },
+                );
+
+                setSelectedAvatar(nextAvatar);
+                return;
+            }
+        }
+
+        const fallback =
+            getDefaultAvatar();
+
+        setSelectedAvatar(fallback);
+    }, [
+        avatars,
+        initialAvatarId,
+    ]);
 
     const selectAvatar = useCallback(
         (avatar: AvatarDefinition) => {

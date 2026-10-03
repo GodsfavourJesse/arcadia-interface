@@ -3,6 +3,7 @@
 import {
     useCallback,
     useEffect,
+    useMemo,
     useRef,
     useState,
     type ReactNode,
@@ -686,9 +687,14 @@ export function CallOverlay() {
      * localAvatarId identifies the avatar selected before
      * the call began.
      */
+    const localAvatarOptions = useMemo(
+        () => (localAvatar ? [localAvatar] : []),
+        [localAvatar],
+    );
+
     const { avatars, selectedAvatar, selectAvatar } = useAvatarSelection({
         initialAvatarId: localAvatarId ?? "default-vrm",
-        extraAvatars: localAvatar ? [localAvatar] : [],
+        extraAvatars: localAvatarOptions,
     });
 
     /*

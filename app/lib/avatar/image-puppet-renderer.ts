@@ -113,6 +113,13 @@ export class ImagePuppetRenderer implements AvatarRenderer {
         this.triangles = [];
         this.lastRenderTime = 0;
 
+        console.log("[Avatar] ImagePuppetRenderer loaded image", {
+            avatarId: avatar.id,
+            assetUrl: avatar.assetUrl,
+            width: image.naturalWidth,
+            height: image.naturalHeight,
+        });
+
         try {
             const landmarker = await createImageLandmarker();
 
@@ -132,6 +139,16 @@ export class ImagePuppetRenderer implements AvatarRenderer {
 
                 this.triangles = triangulateFace(
                     this.sourceLandmarks,
+                );
+
+                console.log("[Avatar] ImagePuppetRenderer source face analyzed", {
+                    landmarkCount: this.sourceLandmarks.length,
+                    triangleCount: this.triangles.length,
+                });
+            } else {
+                console.warn(
+                    "[Avatar] Uploaded image contains no detectable face; using static portrait.",
+                    { landmarkCount: landmarks.length },
                 );
             }
         } catch (error) {

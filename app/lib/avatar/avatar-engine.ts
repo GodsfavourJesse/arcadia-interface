@@ -65,6 +65,15 @@ export class AvatarEngine {
             canvas,
         );
 
+        console.log("[AvatarEngine] Loading avatar renderer", {
+            avatarId: avatar.id,
+            avatarName: avatar.name,
+            avatarType: avatar.type,
+            renderMode: avatar.renderMode,
+            renderer: nextRenderer.constructor.name,
+            assetUrl: avatar.assetUrl,
+        });
+
         try {
             await nextRenderer.load(avatar);
         } catch (error) {
