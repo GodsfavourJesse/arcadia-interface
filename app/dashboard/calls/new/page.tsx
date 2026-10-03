@@ -1,49 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { Fragment, useCallback, useState } from "react";
 
-import {
-    createDirectConversation,
-} from "@/app/services/conversation/conversations.service";
+import { createDirectConversation } from "@/app/services/conversation/conversations.service";
+import { searchUsers } from "@/app/services/users/users.service";
+import { useCallStore } from "@/app/store/calls/call.store";
+import { CALL_TYPE, type CallType } from "@/app/types/calls/calls.types";
+import { useAvatarSelection } from "@/app/hooks/avatar/useAvatarSelection";
+import { AvatarCard } from "@/app/components/avatar/avatar-card";
+import type { AvatarDefinition } from "@/app/types/avatar/avatar.types";
+import { useActiveCall } from "@/app/hooks/calls/useActiveCall";
+import type { DiscoverableUser } from "@/app/types/users/users.types";
 
-import {
-    searchUsers,
-} from "@/app/services/users/users.service";
+type Step = "recipient" | "type" | "avatar";
 
-import {
-    useCallStore,
-} from "@/app/store/calls/call.store";
-
-import {
-    CALL_TYPE,
-    type CallType,
-} from "@/app/types/calls/calls.types";
-
-import {
-    useAvatarSelection,
-} from "@/app/hooks/avatar/useAvatarSelection";
-
-import {
-    AvatarCard,
-} from "@/app/components/avatar/avatar-card";
-
-import type {
-    AvatarDefinition,
-} from "@/app/types/avatar/avatar.types";
-
-import {
-    useActiveCall,
-} from "@/app/hooks/calls/useActiveCall";
-
-import type {
-    DiscoverableUser,
-} from "@/app/types/users/users.types";
-
-type Step =
-    | "recipient"
-    | "type"
-    | "avatar";
+const STEPS: { id: Step; label: string }[] = [
+    { id: "recipient", label: "1. Person" },
+    { id: "type", label: "2. Call type" },
+    { id: "avatar", label: "3. Avatar" },
+];
 
 function PhoneIcon() {
     return (
@@ -74,14 +50,7 @@ function VideoIcon() {
             strokeWidth="1.8"
             aria-hidden="true"
         >
-            <rect
-                x="3"
-                y="6"
-                width="12"
-                height="12"
-                rx="2"
-            />
-
+            <rect x="3" y="6" width="12" height="12" rx="2" />
             <path
                 d="m15 10 5-3v10l-5-3"
                 strokeLinecap="round"
@@ -91,17 +60,24 @@ function VideoIcon() {
     );
 }
 
-function UserAvatar({
-    user,
-}: {
-    user: DiscoverableUser;
-}) {
+function ErrorBanner({ message }: { message: string }) {
+    return (
+        <div
+            role="alert"
+            className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+            {message}
+        </div>
+    );
+}
+
+function UserAvatar({ user }: { user: DiscoverableUser }) {
     if (user.profilePictureUrl) {
         return (
             <img
                 src={user.profilePictureUrl}
                 alt=""
-                className="h-14 w-14 rounded-full object-cover"
+                className="h-14 w-14 shrink-0 rounded-full object-cover"
             />
         );
     }
@@ -111,10 +87,7 @@ function UserAvatar({
             .split(/\s+/)
             .filter(Boolean)
             .slice(0, 2)
-            .map(
-                (part) =>
-                    part[0]?.toUpperCase(),
-            )
+            .map((part) => part[0]?.toUpperCase())
             .join("") || "M";
 
     return (
@@ -137,6 +110,7 @@ function SearchResult({
         <button
             type="button"
             onClick={onSelect}
+            aria-pressed={selected}
             className={`flex w-full items-center gap-4 rounded-2xl border p-4 text-left transition ${
                 selected
                     ? "border-slate-950 bg-slate-50"
@@ -171,147 +145,89 @@ function SearchResult({
 }
 
 export default function MakeCallPage() {
-    const startCall = useCallStore(
-        (state) => state.startCall,
-    );
+    const startCall = useCallStore((state) => state.startCall);
+    const storeError = useCallStore((state) => state.error);
+    const isStarting = useCallStore((state) => state.isStarting);
 
-    const storeError = useCallStore(
-        (state) => state.error,
-    );
+    const { activeCall } = useActiveCall();
 
-    const isStarting = useCallStore(
-        (state) => state.isStarting,
-    );
+    const { avatars, selectedAvatar, selectAvatar, isSelected } =
+        useAvatarSelection({
+            initialAvatarId: "default-vrm",
+        });
 
-    const {
-        activeCall,
-    } = useActiveCall();
-
-    const {
-        avatars,
-        selectedAvatar,
-        selectAvatar,
-        isSelected,
-    } = useAvatarSelection({
-        initialAvatarId: "default-vrm",
-    });
-
-    const [
-        step,
-        setStep,
-    ] = useState<Step>("recipient");
-
-    const [
-        miyorNumber,
-        setMiyorNumber,
-    ] = useState("");
-
-    const [
-        results,
-        setResults,
-    ] = useState<DiscoverableUser[]>([]);
-
-    const [
-        selectedUser,
-        setSelectedUser,
-    ] = useState<DiscoverableUser | null>(
+    const [step, setStep] = useState<Step>("recipient");
+    const [miyorNumber, setMiyorNumber] = useState("");
+    const [results, setResults] = useState<DiscoverableUser[]>([]);
+    const [selectedUser, setSelectedUser] = useState<DiscoverableUser | null>(
         null,
     );
+    const [callType, setCallType] = useState<CallType | null>(null);
+    const [isSearching, setIsSearching] = useState(false);
+    const [isCreatingConversation, setIsCreatingConversation] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
-    const [
-        callType,
-        setCallType,
-    ] = useState<CallType | null>(
-        null,
-    );
+    const busy = isStarting || isCreatingConversation;
 
-    const [
-        isSearching,
-        setIsSearching,
-    ] = useState(false);
+    /*
+     * Show a single error at a time so the same failure is not
+     * rendered twice (local error + store error).
+     */
+    const displayError = error ?? storeError;
 
-    const [
-        isCreatingConversation,
-        setIsCreatingConversation,
-    ] = useState(false);
+    const handleSearch = useCallback(async () => {
+        if (isSearching) {
+            return;
+        }
 
-    const [
-        error,
-        setError,
-    ] = useState<string | null>(null);
+        const query = miyorNumber.trim();
 
-    const handleSearch = useCallback(
-        async () => {
-            const query =
-                miyorNumber.trim();
+        if (!query) {
+            setError("Enter a Miyor number.");
+            return;
+        }
 
-            if (!query) {
-                setError(
-                    "Enter a Miyor number.",
-                );
-                return;
+        setError(null);
+        setSelectedUser(null);
+        setResults([]);
+        setIsSearching(true);
+
+        try {
+            /*
+             * searchUsers() returns UserSearchResponse directly.
+             *
+             * The response shape is:
+             *
+             * {
+             *     status: "ok",
+             *     results: DiscoverableUser[]
+             * }
+             */
+            const response = await searchUsers(query);
+
+            setResults(response.results);
+
+            if (response.results.length === 1) {
+                setSelectedUser(response.results[0]);
             }
 
-            setError(null);
-            setSelectedUser(null);
-            setResults([]);
-            setIsSearching(true);
-
-            try {
-                /*
-                 * searchUsers() returns
-                 * UserSearchResponse directly.
-                 *
-                 * The response shape is:
-                 *
-                 * {
-                 *     status: "ok",
-                 *     results: DiscoverableUser[]
-                 * }
-                 */
-                const response =
-                    await searchUsers(query);
-
-                setResults(
-                    response.results,
-                );
-
-                if (
-                    response.results.length ===
-                    1
-                ) {
-                    setSelectedUser(
-                        response.results[0],
-                    );
-                }
-
-                if (
-                    response.results.length ===
-                    0
-                ) {
-                    setError(
-                        "No Miyor member was found with that number.",
-                    );
-                }
-            } catch (requestError) {
-                setError(
-                    requestError instanceof
-                        Error
-                        ? requestError.message
-                        : "Unable to find that Miyor member.",
-                );
-            } finally {
-                setIsSearching(false);
+            if (response.results.length === 0) {
+                setError("No Miyor member was found with that number.");
             }
-        },
-        [miyorNumber],
-    );
+        } catch (requestError) {
+            setError(
+                requestError instanceof Error
+                    ? requestError.message
+                    : "Unable to find that Miyor member.",
+            );
+        } finally {
+            setIsSearching(false);
+        }
+    }, [isSearching, miyorNumber]);
 
     function handleContinueFromRecipient() {
         if (!selectedUser) {
-            setError(
-                "Select the Miyor member you want to call.",
-            );
+            setError("Select the Miyor member you want to call.");
             return;
         }
 
@@ -319,10 +235,69 @@ export default function MakeCallPage() {
         setStep("type");
     }
 
-    function handleSelectType(
+    async function createAndStartCall(
         type: CallType,
+        avatar: AvatarDefinition | null,
     ) {
         if (!selectedUser) {
+            setError("Select a Miyor member first.");
+            return;
+        }
+
+        /*
+         * Video calls require an avatar.
+         *
+         * Resolve the nullable parameter before entering the async
+         * try block so the rest of the function works with a single
+         * value instead of re-checking the call type.
+         */
+        const videoAvatar = type === CALL_TYPE.VIDEO ? avatar : null;
+
+        if (type === CALL_TYPE.VIDEO && !videoAvatar) {
+            setError("Select an avatar before starting the video call.");
+            return;
+        }
+
+        setError(null);
+        setIsCreatingConversation(true);
+
+        try {
+            /*
+             * createDirectConversation() returns
+             * CreateConversationResponse directly.
+             */
+            const conversationResponse = await createDirectConversation(
+                selectedUser.id,
+            );
+
+            const conversationId = conversationResponse.conversation.id;
+
+            /*
+             * The selected avatar is local media configuration.
+             * It is not sent to the backend as media, tracking,
+             * or call metadata.
+             */
+            await startCall({
+                conversationId,
+                calleeId: selectedUser.id,
+                type,
+                initialVideoSource:
+                    type === CALL_TYPE.VIDEO ? "avatar" : "camera",
+                avatarId: videoAvatar?.id ?? null,
+            });
+        } catch (requestError) {
+            setError(
+                requestError instanceof Error
+                    ? requestError.message
+                    : "Unable to start the call.",
+            );
+        } finally {
+            setIsCreatingConversation(false);
+        }
+    }
+
+    function handleSelectType(type: CallType) {
+        if (!selectedUser || busy) {
             return;
         }
 
@@ -334,114 +309,32 @@ export default function MakeCallPage() {
             return;
         }
 
-        void createAndStartCall(
-            type,
-            null,
-        );
-    }
-
-    async function createAndStartCall(
-        type: CallType,
-        avatar: AvatarDefinition | null,
-    ) {
-        if (!selectedUser) {
-            setError(
-                "Select a Miyor member first.",
-            );
-            return;
-        }
-
-        if (
-            type === CALL_TYPE.VIDEO &&
-            !avatar
-        ) {
-            setError(
-                "Select an avatar before starting the video call.",
-            );
-            return;
-        }
-
-        setError(null);
-        setIsCreatingConversation(true);
-
-        try {
-            /*
-             * createDirectConversation()
-             * returns CreateConversationResponse
-             * directly.
-             */
-            const conversationResponse =
-                await createDirectConversation(
-                    selectedUser.id,
-                );
-
-            const conversationId =
-                conversationResponse
-                    .conversation.id;
-
-            /*
-             * The selected avatar is not sent
-             * to the backend as media or tracking
-             * data.
-             *
-             * The avatar/media layer will use the
-             * selected avatar locally when preparing
-             * the video call.
-             */
-            if (type === CALL_TYPE.VIDEO) {
-                void avatar;
-            }
-
-            await startCall({
-                conversationId,
-                calleeId:
-                    selectedUser.id,
-                type,
-            });
-        } catch (requestError) {
-            setError(
-                requestError instanceof
-                    Error
-                    ? requestError.message
-                    : "Unable to start the call.",
-            );
-        } finally {
-            setIsCreatingConversation(
-                false,
-            );
-        }
+        void createAndStartCall(type, null);
     }
 
     function handleConfirmAvatar() {
         if (!selectedAvatar) {
-            setError(
-                "Select an avatar to continue.",
-            );
+            setError("Select an avatar to continue.");
             return;
         }
 
-        void createAndStartCall(
-            CALL_TYPE.VIDEO,
-            selectedAvatar,
-        );
+        void createAndStartCall(CALL_TYPE.VIDEO, selectedAvatar);
     }
 
     function handleBack() {
         setError(null);
 
         if (step === "avatar") {
+            setCallType(null);
             setStep("type");
             return;
         }
 
         if (step === "type") {
+            setCallType(null);
             setStep("recipient");
         }
     }
-
-    const busy =
-        isStarting ||
-        isCreatingConversation;
 
     if (activeCall) {
         return (
@@ -452,8 +345,7 @@ export default function MakeCallPage() {
                     </h1>
 
                     <p className="mt-2 text-sm text-slate-500">
-                        Finish your current call before
-                        starting another one.
+                        Finish your current call before starting another one.
                     </p>
 
                     <Link
@@ -478,69 +370,38 @@ export default function MakeCallPage() {
                 </Link>
 
                 <header className="mt-8">
-                    <p className="text-sm font-medium text-slate-500">
-                        Miyor
-                    </p>
+                    <p className="text-sm font-medium text-slate-500">Miyor</p>
 
                     <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-950">
                         Make a call
                     </h1>
 
                     <p className="mt-2 text-sm leading-6 text-slate-500">
-                        Connect with a Miyor member using
-                        their Miyor number.
+                        Connect with a Miyor member using their Miyor number.
                     </p>
                 </header>
 
                 <div className="mt-8">
                     <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
-                        <span
-                            className={
-                                step === "recipient"
-                                    ? "text-slate-950"
-                                    : ""
-                            }
-                        >
-                            1. Person
-                        </span>
+                        {STEPS.map((item, index) => (
+                            <Fragment key={item.id}>
+                                {index > 0 && <span>•</span>}
 
-                        <span>•</span>
-
-                        <span
-                            className={
-                                step === "type"
-                                    ? "text-slate-950"
-                                    : ""
-                            }
-                        >
-                            2. Call type
-                        </span>
-
-                        <span>•</span>
-
-                        <span
-                            className={
-                                step === "avatar"
-                                    ? "text-slate-950"
-                                    : ""
-                            }
-                        >
-                            3. Avatar
-                        </span>
+                                <span
+                                    className={
+                                        step === item.id
+                                            ? "text-slate-950"
+                                            : ""
+                                    }
+                                >
+                                    {item.label}
+                                </span>
+                            </Fragment>
+                        ))}
                     </div>
                 </div>
 
-                {error && (
-                    <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                        {error}
-                    </div>
-                )}
-
-                {storeError && (
-                    <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                        {storeError}
-                    </div>
-                )}
+                {displayError && <ErrorBanner message={displayError} />}
 
                 {step === "recipient" && (
                     <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -554,19 +415,12 @@ export default function MakeCallPage() {
 
                         <div className="mt-6 flex flex-col gap-3 sm:flex-row">
                             <input
-                                value={
-                                    miyorNumber
-                                }
+                                value={miyorNumber}
                                 onChange={(event) =>
-                                    setMiyorNumber(
-                                        event.target.value,
-                                    )
+                                    setMiyorNumber(event.target.value)
                                 }
                                 onKeyDown={(event) => {
-                                    if (
-                                        event.key ===
-                                        "Enter"
-                                    ) {
+                                    if (event.key === "Enter") {
                                         void handleSearch();
                                     }
                                 }}
@@ -577,56 +431,32 @@ export default function MakeCallPage() {
 
                             <button
                                 type="button"
-                                onClick={() =>
-                                    void handleSearch()
-                                }
-                                disabled={
-                                    isSearching ||
-                                    !miyorNumber.trim()
-                                }
+                                onClick={() => void handleSearch()}
+                                disabled={isSearching || !miyorNumber.trim()}
                                 className="h-12 rounded-xl bg-slate-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                                {isSearching
-                                    ? "Searching..."
-                                    : "Find member"}
+                                {isSearching ? "Searching..." : "Find member"}
                             </button>
                         </div>
 
                         {results.length > 0 && (
                             <div className="mt-6 space-y-3">
-                                {results.map(
-                                    (user) => (
-                                        <SearchResult
-                                            key={
-                                                user.id
-                                            }
-                                            user={
-                                                user
-                                            }
-                                            selected={
-                                                selectedUser?.id ===
-                                                user.id
-                                            }
-                                            onSelect={() =>
-                                                setSelectedUser(
-                                                    user,
-                                                )
-                                            }
-                                        />
-                                    ),
-                                )}
+                                {results.map((user) => (
+                                    <SearchResult
+                                        key={user.id}
+                                        user={user}
+                                        selected={selectedUser?.id === user.id}
+                                        onSelect={() => setSelectedUser(user)}
+                                    />
+                                ))}
                             </div>
                         )}
 
                         <div className="mt-6 flex justify-end">
                             <button
                                 type="button"
-                                onClick={
-                                    handleContinueFromRecipient
-                                }
-                                disabled={
-                                    !selectedUser
-                                }
+                                onClick={handleContinueFromRecipient}
+                                disabled={!selectedUser}
                                 className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                                 Continue
@@ -639,17 +469,11 @@ export default function MakeCallPage() {
                     <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                         {selectedUser && (
                             <div className="flex items-center gap-4 rounded-2xl bg-slate-50 p-4">
-                                <UserAvatar
-                                    user={
-                                        selectedUser
-                                    }
-                                />
+                                <UserAvatar user={selectedUser} />
 
                                 <div>
                                     <p className="font-semibold text-slate-950">
-                                        {
-                                            selectedUser.displayName
-                                        }
+                                        {selectedUser.displayName}
                                     </p>
 
                                     <p className="text-sm text-slate-500">
@@ -668,11 +492,7 @@ export default function MakeCallPage() {
                         <div className="mt-5 grid gap-4 sm:grid-cols-2">
                             <button
                                 type="button"
-                                onClick={() =>
-                                    handleSelectType(
-                                        CALL_TYPE.VOICE,
-                                    )
-                                }
+                                onClick={() => handleSelectType(CALL_TYPE.VOICE)}
                                 disabled={busy}
                                 className="group rounded-2xl border border-slate-200 p-6 text-left transition hover:border-slate-400 hover:shadow-sm disabled:opacity-50"
                             >
@@ -685,18 +505,13 @@ export default function MakeCallPage() {
                                 </h3>
 
                                 <p className="mt-1 text-sm leading-6 text-slate-500">
-                                    Start an audio call
-                                    immediately.
+                                    Start an audio call immediately.
                                 </p>
                             </button>
 
                             <button
                                 type="button"
-                                onClick={() =>
-                                    handleSelectType(
-                                        CALL_TYPE.VIDEO,
-                                    )
-                                }
+                                onClick={() => handleSelectType(CALL_TYPE.VIDEO)}
                                 disabled={busy}
                                 className="group rounded-2xl border border-slate-200 p-6 text-left transition hover:border-slate-400 hover:shadow-sm disabled:opacity-50"
                             >
@@ -709,17 +524,14 @@ export default function MakeCallPage() {
                                 </h3>
 
                                 <p className="mt-1 text-sm leading-6 text-slate-500">
-                                    Choose your avatar
-                                    before you call.
+                                    Choose your avatar before you call.
                                 </p>
                             </button>
                         </div>
 
                         <button
                             type="button"
-                            onClick={
-                                handleBack
-                            }
+                            onClick={handleBack}
                             disabled={busy}
                             className="mt-6 text-sm font-medium text-slate-500 hover:text-slate-950"
                         >
@@ -736,49 +548,31 @@ export default function MakeCallPage() {
                             </h2>
 
                             <p className="mt-1 text-sm leading-6 text-slate-500">
-                                This is what the other
-                                person will see when the
+                                This is what the other person will see when the
                                 video call connects.
                             </p>
                         </div>
 
                         <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
-                            {avatars.map(
-                                (avatar) => (
-                                    <AvatarCard
-                                        key={
-                                            avatar.id
-                                        }
-                                        avatar={
-                                            avatar
-                                        }
-                                        selected={isSelected(
-                                            avatar.id,
-                                        )}
-                                        disabled={
-                                            busy
-                                        }
-                                        onSelect={() =>
-                                            selectAvatar(
-                                                avatar,
-                                            )
-                                        }
-                                    />
-                                ),
-                            )}
+                            {avatars.map((avatar) => (
+                                <AvatarCard
+                                    key={avatar.id}
+                                    avatar={avatar}
+                                    selected={isSelected(avatar.id)}
+                                    disabled={busy}
+                                    onSelect={() => selectAvatar(avatar)}
+                                />
+                            ))}
                         </div>
 
                         {selectedAvatar && (
                             <div className="mt-6 rounded-2xl bg-slate-50 p-4">
                                 <p className="text-sm font-semibold text-slate-950">
-                                    {
-                                        selectedAvatar.name
-                                    }
+                                    {selectedAvatar.name}
                                 </p>
 
                                 <p className="mt-1 text-xs text-slate-500">
-                                    Ready for your
-                                    video call.
+                                    Ready for your video call.
                                 </p>
                             </div>
                         )}
@@ -786,9 +580,7 @@ export default function MakeCallPage() {
                         <div className="mt-6 flex items-center justify-between gap-4">
                             <button
                                 type="button"
-                                onClick={
-                                    handleBack
-                                }
+                                onClick={handleBack}
                                 disabled={busy}
                                 className="text-sm font-medium text-slate-500 hover:text-slate-950"
                             >
@@ -797,18 +589,11 @@ export default function MakeCallPage() {
 
                             <button
                                 type="button"
-                                onClick={
-                                    handleConfirmAvatar
-                                }
-                                disabled={
-                                    busy ||
-                                    !selectedAvatar
-                                }
+                                onClick={handleConfirmAvatar}
+                                disabled={busy || !selectedAvatar}
                                 className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
                             >
-                                {busy
-                                    ? "Starting call..."
-                                    : "Start video call"}
+                                {busy ? "Starting call..." : "Start video call"}
                             </button>
                         </div>
                     </section>
@@ -816,8 +601,7 @@ export default function MakeCallPage() {
 
                 {callType && (
                     <p className="mt-6 text-center text-xs text-slate-400">
-                        {callType ===
-                        CALL_TYPE.VIDEO
+                        {callType === CALL_TYPE.VIDEO
                             ? "Your avatar will be prepared before the video session begins."
                             : "Your microphone will be requested when the call connects."}
                     </p>

@@ -3,6 +3,7 @@ import { apiRequest } from "@/app/lib/client";
 import type {
     CallActionResponse,
     CallType,
+    CallVideoSource,
     CreateCallResponse,
     GetCallEventsResponse,
     GetCallResponse,
@@ -14,10 +15,27 @@ export function createCall(input: {
     conversationId: string;
     calleeId: string;
     type: CallType;
+    videoSource?: CallVideoSource;
+    avatarId?: string | null;
 }) {
+    const {
+        conversationId,
+        calleeId,
+        type,
+    } = input;
+
+    /*
+     * videoSource/avatarId are frontend media-session preferences.
+     * They are deliberately not sent as call API fields; avatar media
+     * itself never crosses the application signaling/backend layer.
+     */
     return apiRequest<CreateCallResponse>("/calls", {
         method: "POST",
-        body: JSON.stringify(input),
+        body: JSON.stringify({
+            conversationId,
+            calleeId,
+            type,
+        }),
     });
 }
 

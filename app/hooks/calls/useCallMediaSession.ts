@@ -4,7 +4,10 @@ import { useCallback, useEffect, useRef } from "react";
 
 import { useWebRTC } from "@/app/hooks/calls/useWebRTC";
 import { useAvatarMedia } from "@/app/hooks/avatar/useAvatarMedia";
-import type { CallType } from "@/app/types/calls/calls.types";
+import type {
+    CallType,
+    CallVideoSource,
+} from "@/app/types/calls/calls.types";
 
 type UseCallMediaSessionOptions = {
     callId: string | null;
@@ -14,6 +17,7 @@ type UseCallMediaSessionOptions = {
     isAccepted: boolean;
     isConnected: boolean;
     isCameraEnabled: boolean;
+    initialVideoSource?: CallVideoSource;
     onConnected?: () => void;
     onFailed?: (error: Error) => void;
 };
@@ -26,6 +30,7 @@ export function useCallMediaSession({
     isAccepted,
     isConnected,
     isCameraEnabled,
+    initialVideoSource = "camera",
     onConnected,
     onFailed,
 }: UseCallMediaSessionOptions) {
@@ -75,6 +80,7 @@ export function useCallMediaSession({
         callType,
         isCaller,
         enabled,
+        initialVideoSource,
         onConnected,
         onFailed,
     });
@@ -166,6 +172,7 @@ export function useCallMediaSession({
      */
     useEffect(() => {
         if (
+            initialVideoSource !== "avatar" ||
             !isVideoCall ||
             !isCaller ||
             !enabled ||
@@ -258,6 +265,7 @@ export function useCallMediaSession({
         isCameraEnabled,
         isVideoCall,
         isVideoSenderReady,
+        initialVideoSource,
     ]);
 
     /*

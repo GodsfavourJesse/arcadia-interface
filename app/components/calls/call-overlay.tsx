@@ -8,68 +8,35 @@ import {
     type ReactNode,
 } from "react";
 
-import {
-    getConversation,
-} from "@/app/services/conversation/conversations.service";
+import { getConversation } from "@/app/services/conversation/conversations.service";
+import { useActiveCall } from "@/app/hooks/calls/useActiveCall";
+import { useWebRTC } from "@/app/hooks/calls/useWebRTC";
+import { useCallRingtone } from "@/app/hooks/calls/useCallRingtone";
+import { useAvatarMedia } from "@/app/hooks/avatar/useAvatarMedia";
+import { useAvatarSelection } from "@/app/hooks/avatar/useAvatarSelection";
+import { useCallStore } from "@/app/store/calls/call.store";
+import { CALL_STATE, CALL_TYPE } from "@/app/types/calls/calls.types";
+import type { AvatarDefinition } from "@/app/types/avatar/avatar.types";
 
-import {
-    useActiveCall,
-} from "@/app/hooks/calls/useActiveCall";
-
-import {
-    useWebRTC,
-} from "@/app/hooks/calls/useWebRTC";
-
-import {
-    useCallRingtone,
-} from "@/app/hooks/calls/useCallRingtone";
-
-import {
-    useAvatarMedia,
-} from "@/app/hooks/avatar/useAvatarMedia";
-
-import {
-    useAvatarSelection,
-} from "@/app/hooks/avatar/useAvatarSelection";
-
-import {
-    useCallStore,
-} from "@/app/store/calls/call.store";
-
-import {
-    CALL_STATE,
-    CALL_TYPE,
-} from "@/app/types/calls/calls.types";
-
-import type {
-    AvatarDefinition,
-} from "@/app/types/avatar/avatar.types";
-
-import {
-    CallControls,
-} from "./call-controls";
-
-import {
-    IncomingCallModal,
-} from "./incoming-call-modal";
-
-import {
-    OutgoingCallModal,
-} from "./outgoing-call-modal";
-
-import {
-    AvatarPreview,
-} from "../avatar/avatar-preview";
-
-import {
-    AvatarCard,
-} from "../avatar/avatar-card";
+import { CallControls } from "./call-controls";
+import { IncomingCallModal } from "./incoming-call-modal";
+import { OutgoingCallModal } from "./outgoing-call-modal";
+import { AvatarPreview } from "../avatar/avatar-preview";
+import { AvatarCard } from "../avatar/avatar-card";
 
 type Profile = {
     displayName: string;
     username?: string;
     profilePictureUrl?: string | null;
 };
+
+type LoadedProfile = {
+    conversationId: string;
+    profile: Profile;
+};
+
+const FALLBACK_PROFILE: Profile = { displayName: "Miyor user" };
+const SELF_PROFILE: Profile = { displayName: "You" };
 
 function Avatar({
     profile,
@@ -83,23 +50,18 @@ function Avatar({
             .split(/\s+/)
             .filter(Boolean)
             .slice(0, 2)
-            .map(
-                (part) =>
-                    part[0]?.toUpperCase(),
-            )
+            .map((part) => part[0]?.toUpperCase())
             .join("") || "M";
 
     const sizeClass =
-        size === "small"
-            ? "h-16 w-16 text-xl"
-            : "h-28 w-28 text-3xl";
+        size === "small" ? "h-16 w-16 text-xl" : "h-28 w-28 text-3xl";
 
     if (profile.profilePictureUrl) {
         return (
             <img
                 src={profile.profilePictureUrl}
                 alt=""
-                className={`${sizeClass} rounded-full object-cover ring-4 ring-white/10`}
+                className={`${sizeClass} shrink-0 rounded-full object-cover ring-4 ring-white/10`}
             />
         );
     }
@@ -113,18 +75,12 @@ function Avatar({
     );
 }
 
-function formatDuration(
-    totalSeconds: number,
-) {
-    const minutes = Math.floor(
-        totalSeconds / 60,
-    )
+function formatDuration(totalSeconds: number) {
+    const minutes = Math.floor(totalSeconds / 60)
         .toString()
         .padStart(2, "0");
 
-    const seconds = Math.floor(
-        totalSeconds % 60,
-    )
+    const seconds = Math.floor(totalSeconds % 60)
         .toString()
         .padStart(2, "0");
 
@@ -140,10 +96,7 @@ function VideoSurface({
     muted?: boolean;
     className: string;
 }) {
-    const ref =
-        useRef<HTMLVideoElement | null>(
-            null,
-        );
+    const ref = useRef<HTMLVideoElement | null>(null);
 
     useEffect(() => {
         const video = ref.current;
@@ -189,10 +142,7 @@ function RemoteAudio({
     stream: MediaStream | null;
     enabled: boolean;
 }) {
-    const ref =
-        useRef<HTMLAudioElement | null>(
-            null,
-        );
+    const ref = useRef<HTMLAudioElement | null>(null);
 
     useEffect(() => {
         const audio = ref.current;
@@ -206,7 +156,6 @@ function RemoteAudio({
          * The local stream is never attached to this element.
          */
         audio.srcObject = stream;
-
         audio.autoplay = true;
         audio.muted = !enabled;
         audio.volume = enabled ? 1 : 0;
@@ -226,13 +175,7 @@ function RemoteAudio({
         };
     }, [stream, enabled]);
 
-    return (
-        <audio
-            ref={ref}
-            autoPlay
-            playsInline
-        />
-    );
+    return <audio ref={ref} autoPlay />;
 }
 
 function MediaButton({
@@ -280,17 +223,11 @@ function AvatarIcon() {
             strokeWidth="1.7"
             aria-hidden="true"
         >
-            <circle
-                cx="12"
-                cy="8"
-                r="3.2"
-            />
-
+            <circle cx="12" cy="8" r="3.2" />
             <path
                 d="M5.5 19.2c.8-3.2 3.1-5 6.5-5s5.7 1.8 6.5 5"
                 strokeLinecap="round"
             />
-
             <path
                 d="M4 8.5a8 8 0 0 0 2 5.4M20 8.5a8 8 0 0 1-2 5.4"
                 strokeLinecap="round"
@@ -300,11 +237,7 @@ function AvatarIcon() {
     );
 }
 
-function SpeakerIcon({
-    muted,
-}: {
-    muted: boolean;
-}) {
+function MicIcon({ muted }: { muted: boolean }) {
     if (muted) {
         return (
             <svg
@@ -315,14 +248,15 @@ function SpeakerIcon({
                 strokeWidth="1.8"
                 aria-hidden="true"
             >
+                <path d="M5 5l14 14" strokeLinecap="round" />
                 <path
-                    d="m4 9 4-3h3v12H8l-4-3V9Z"
-                    strokeLinejoin="round"
-                />
-
-                <path
-                    d="m16 9 5 5M21 9l-5 5"
+                    d="M9.5 9.5V6a2.5 2.5 0 0 1 5 0v5"
                     strokeLinecap="round"
+                />
+                <path
+                    d="M6.8 11.2a5.2 5.2 0 0 0 8.7 3.8M12 19v-3M9 19h6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
                 />
             </svg>
         );
@@ -337,11 +271,79 @@ function SpeakerIcon({
             strokeWidth="1.8"
             aria-hidden="true"
         >
+            <rect x="8" y="3" width="8" height="12" rx="4" />
             <path
-                d="m4 9 4-3h3v12H8l-4-3V9Z"
+                d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"
+                strokeLinecap="round"
                 strokeLinejoin="round"
             />
+        </svg>
+    );
+}
 
+function CameraIcon({ off }: { off: boolean }) {
+    if (off) {
+        return (
+            <svg
+                viewBox="0 0 24 24"
+                className="h-6 w-6"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                aria-hidden="true"
+            >
+                <path d="M3 3l18 18" strokeLinecap="round" />
+                <path
+                    d="M9.5 6H14a2 2 0 0 1 2 2v2l5-3v10l-3.2-1.9M7 6.8A2 2 0 0 0 5 9v6a2 2 0 0 0 2 2h7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                />
+            </svg>
+        );
+    }
+
+    return (
+        <svg
+            viewBox="0 0 24 24"
+            className="h-6 w-6"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            aria-hidden="true"
+        >
+            <rect x="3" y="6" width="13" height="12" rx="2.5" />
+            <path d="m16 10 5-3v10l-5-3z" strokeLinejoin="round" />
+        </svg>
+    );
+}
+
+function SpeakerIcon({ muted }: { muted: boolean }) {
+    if (muted) {
+        return (
+            <svg
+                viewBox="0 0 24 24"
+                className="h-6 w-6"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                aria-hidden="true"
+            >
+                <path d="m4 9 4-3h3v12H8l-4-3V9Z" strokeLinejoin="round" />
+                <path d="m16 9 5 5M21 9l-5 5" strokeLinecap="round" />
+            </svg>
+        );
+    }
+
+    return (
+        <svg
+            viewBox="0 0 24 24"
+            className="h-6 w-6"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            aria-hidden="true"
+        >
+            <path d="m4 9 4-3h3v12H8l-4-3V9Z" strokeLinejoin="round" />
             <path
                 d="M15 9.5a4 4 0 0 1 0 5M18 7a7.5 7.5 0 0 1 0 10"
                 strokeLinecap="round"
@@ -360,10 +362,7 @@ function CloseIcon() {
             strokeWidth="1.8"
             aria-hidden="true"
         >
-            <path
-                d="M6 6l12 12M18 6 6 18"
-                strokeLinecap="round"
-            />
+            <path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" />
         </svg>
     );
 }
@@ -378,11 +377,23 @@ function CheckIcon() {
             strokeWidth="2"
             aria-hidden="true"
         >
-            <path
-                d="m5 10 3 3 7-7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-            />
+            <path d="m5 10 3 3 7-7" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+    );
+}
+
+function MutedBadgeIcon() {
+    return (
+        <svg
+            viewBox="0 0 24 24"
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            aria-hidden="true"
+        >
+            <path d="M5 5l14 14" strokeLinecap="round" />
+            <path d="M9.5 9.5V6a2.5 2.5 0 0 1 5 0v5" strokeLinecap="round" />
         </svg>
     );
 }
@@ -419,7 +430,7 @@ function AvatarPicker({
                     </h2>
 
                     <p className="mt-1 text-xs text-white/45">
-                        Your camera powers the avatar's movements.
+                        Your camera powers the avatar&apos;s movements.
                     </p>
                 </div>
 
@@ -438,12 +449,9 @@ function AvatarPicker({
                     <AvatarCard
                         key={avatar.id}
                         avatar={avatar}
-                        selected={
-                            selectedAvatar?.id ===
-                            avatar.id
-                        }
+                        selected={selectedAvatar?.id === avatar.id}
                         disabled={disabled}
-                        onSelect={onSelect}
+                        onSelect={() => onSelect(avatar)}
                     />
                 ))}
             </div>
@@ -453,8 +461,7 @@ function AvatarPicker({
                     <div className="min-w-0">
                         <p className="truncate text-xs font-medium text-white/80">
                             {isAvatarActive
-                                ? selectedAvatar?.name ??
-                                  "Avatar"
+                                ? (selectedAvatar?.name ?? "Avatar")
                                 : "Camera mode"}
                         </p>
 
@@ -468,38 +475,27 @@ function AvatarPicker({
                     <div className="flex shrink-0 gap-2">
                         <button
                             type="button"
-                            disabled={
-                                disabled ||
-                                !selectedAvatar
-                            }
+                            disabled={disabled || !selectedAvatar}
                             onClick={onUseAvatar}
                             className={[
                                 "inline-flex h-10 items-center gap-2 rounded-full px-4 text-xs font-semibold transition",
                                 "border",
-                                disabled ||
-                                !selectedAvatar
+                                disabled || !selectedAvatar
                                     ? "cursor-not-allowed border-white/10 bg-white/5 text-white/30"
                                     : "border-violet-300/20 bg-violet-500/20 text-violet-100 hover:bg-violet-500/30",
                             ].join(" ")}
                         >
-                            {isAvatarActive && (
-                                <CheckIcon />
-                            )}
-
+                            {isAvatarActive && <CheckIcon />}
                             Use avatar
                         </button>
 
                         <button
                             type="button"
-                            disabled={
-                                disabled ||
-                                !isAvatarActive
-                            }
+                            disabled={disabled || !isAvatarActive}
                             onClick={onUseCamera}
                             className={[
                                 "inline-flex h-10 items-center rounded-full border px-4 text-xs font-semibold transition",
-                                disabled ||
-                                !isAvatarActive
+                                disabled || !isAvatarActive
                                     ? "cursor-not-allowed border-white/10 bg-white/5 text-white/30"
                                     : "border-white/10 bg-white/10 text-white hover:bg-white/15",
                             ].join(" ")}
@@ -525,19 +521,14 @@ function EndedCallView({
     return (
         <div className="fixed inset-0 z-[120] flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
             <div className="flex w-full max-w-md flex-col items-center text-center">
-                <Avatar
-                    profile={profile}
-                    size="large"
-                />
+                <Avatar profile={profile} size="large" />
 
                 <p className="mt-7 text-xs font-medium uppercase tracking-[0.22em] text-white/40">
                     Miyor
                 </p>
 
                 <h1 className="mt-3 text-3xl font-semibold tracking-tight">
-                    {failed
-                        ? "Call couldn’t connect"
-                        : "Call ended"}
+                    {failed ? "Call couldn’t connect" : "Call ended"}
                 </h1>
 
                 <p className="mt-2 text-sm text-white/50">
@@ -563,63 +554,61 @@ export function CallOverlay() {
         error,
     } = useActiveCall();
 
-    const end =
-        useCallStore(
-            (state) => state.end,
-        );
+    const end = useCallStore((state) => state.end);
+    const accept = useCallStore((state) => state.accept);
+    const decline = useCallStore((state) => state.decline);
+    const cancel = useCallStore((state) => state.cancel);
+    const clearError = useCallStore((state) => state.clearError);
+    const reset = useCallStore((state) => state.reset);
+    const fail = useCallStore((state) => state.fail);
 
-    const accept =
-        useCallStore(
-            (state) => state.accept,
-        );
+    /*
+     * These two values describe the local media choice
+     * made when the call was started.
+     *
+     * localVideoSource:
+     *   "camera" | "avatar"
+     *
+     * localAvatarId:
+     *   The avatar selected on /dashboard/calls/new.
+     */
+    const localVideoSource = useCallStore((state) => state.localVideoSource);
+    const localAvatarId = useCallStore((state) => state.localAvatarId);
 
-    const decline =
-        useCallStore(
-            (state) => state.decline,
-        );
+    const [loadedProfile, setLoadedProfile] = useState<LoadedProfile | null>(
+        null,
+    );
+    const [elapsed, setElapsed] = useState(0);
+    const [isSpeakerEnabled, setIsSpeakerEnabled] = useState(true);
+    const [isAvatarPickerOpen, setIsAvatarPickerOpen] = useState(false);
+    const [dismissedAvatarError, setDismissedAvatarError] = useState<
+        string | null
+    >(null);
 
-    const cancel =
-        useCallStore(
-            (state) => state.cancel,
-        );
+    const conversationId = activeCall?.conversationId ?? null;
+    const myUserId = myParticipant?.userId ?? null;
 
-    const clearError =
-        useCallStore(
-            (state) => state.clearError,
-        );
-
-    const reset =
-        useCallStore(
-            (state) => state.reset,
-        );
-
-    const fail =
-        useCallStore(
-            (state) => state.fail,
-        );
-
-    const [profile, setProfile] =
-        useState<Profile>({
-            displayName:
-                "Miyor user",
-        });
-
-    const [elapsed, setElapsed] =
-        useState(0);
-
-    const [isSpeakerEnabled, setIsSpeakerEnabled] =
-        useState(true);
-
-    const [isAvatarPickerOpen, setIsAvatarPickerOpen] =
-        useState(false);
+    /*
+     * The loaded profile is keyed to its conversation, so a new
+     * call never shows the previous caller's details.
+     */
+    const profile: Profile =
+        loadedProfile && loadedProfile.conversationId === conversationId
+            ? loadedProfile.profile
+            : FALLBACK_PROFILE;
 
     const enabled =
-        Boolean(activeCall) &&
-        !isTerminal &&
-        (isAccepted || isConnected);
+        Boolean(activeCall) && !isTerminal && (isAccepted || isConnected);
 
-    const isVideoCall =
-        activeCall?.type === CALL_TYPE.VIDEO;
+    const isVideoCall = activeCall?.type === CALL_TYPE.VIDEO;
+
+    const handleConnected = useCallback(() => {
+        void useCallStore.getState().markConnected();
+    }, []);
+
+    const handleFailed = useCallback(() => {
+        void fail();
+    }, [fail]);
 
     const {
         localStream,
@@ -633,41 +622,24 @@ export function CallOverlay() {
         replaceVideoTrack,
         isVideoSenderReady,
     } = useWebRTC({
-        callId:
-            activeCall?.id ?? null,
-        callType:
-            activeCall?.type ?? null,
-        isCaller:
-            myParticipant?.role ===
-            "caller",
+        callId: activeCall?.id ?? null,
+        callType: activeCall?.type ?? null,
+        isCaller: myParticipant?.role === "caller",
         enabled,
-        onConnected: () => {
-            void useCallStore
-                .getState()
-                .markConnected();
-        },
-        onFailed: () => {
-            void fail();
-        },
+        onConnected: handleConnected,
+        onFailed: handleFailed,
     });
 
     /*
      * Avatar selection is intentionally independent from
      * avatar activation.
      *
-     * This means the user can select another avatar while
-     * the current avatar remains live on the call.
-     *
-     * AvatarCanvas keeps the same canvas and capture stream;
-     * AvatarEngine swaps only the renderer/model.
+     * If the call was started from /dashboard/calls/new,
+     * localAvatarId identifies the avatar selected before
+     * the call began.
      */
-    const {
-        avatars,
-        selectedAvatar,
-        selectAvatar,
-    } = useAvatarSelection({
-        initialAvatarId:
-            "default-vrm",
+    const { avatars, selectedAvatar, selectAvatar } = useAvatarSelection({
+        initialAvatarId: localAvatarId ?? "default-vrm",
     });
 
     const {
@@ -679,202 +651,157 @@ export function CallOverlay() {
         disableAvatar,
     } = useAvatarMedia({
         cameraStream: localStream,
-        enabled:
-            isVideoCall &&
-            isAccepted &&
-            isConnected &&
-            isCameraEnabled,
-        videoSenderReady:
-            isVideoSenderReady,
+        enabled: isVideoCall && isAccepted && isConnected && isCameraEnabled,
+        videoSenderReady: isVideoSenderReady,
         replaceVideoTrack,
     });
 
-    const handleCameraToggle =
-        useCallback(async () => {
-            /*
-             * Avatar mode uses the avatar track as the
-             * WebRTC video sender track. Camera-off must
-             * therefore restore the physical camera first.
-             */
-            if (isAvatarActive) {
-                try {
-                    await disableAvatar();
-                } catch {
-                    return;
-                }
-            }
+    /*
+     * The avatar error is owned by useAvatarMedia, so the store's
+     * clearError cannot clear it. Track what the user dismissed
+     * locally instead.
+     */
+    const visibleAvatarError =
+        avatarError && avatarError !== dismissedAvatarError
+            ? avatarError
+            : null;
 
-            toggleCamera();
-        }, [
-            disableAvatar,
-            isAvatarActive,
-            toggleCamera,
-        ]);
+    const displayedError = visibleAvatarError ?? error;
 
-    const handleAvatarToggle =
-        useCallback(async () => {
-            if (
-                !isVideoCall ||
-                !isConnected ||
-                !isCameraEnabled ||
-                !avatarVideoTrack ||
-                !selectedAvatar
-            ) {
-                return;
-            }
+    const dismissError = useCallback(() => {
+        clearError();
+        setDismissedAvatarError(avatarError ?? null);
+    }, [avatarError, clearError]);
 
-            try {
-                await toggleAvatar();
-            } catch {
-                /*
-                 * useAvatarMedia owns and exposes the actual
-                 * error state. The call overlay displays it
-                 * through the existing error surface.
-                 */
-            }
-        }, [
-            avatarVideoTrack,
-            isCameraEnabled,
-            isConnected,
-            isVideoCall,
-            selectedAvatar,
-            toggleAvatar,
-        ]);
-
-    const handleSelectAvatar =
-        useCallback(
-            (avatar: AvatarDefinition) => {
-                selectAvatar(avatar);
-
-                /*
-                 * Do not disable avatar mode here.
-                 *
-                 * AvatarCanvas receives the new definition and
-                 * AvatarEngine replaces the renderer on the same
-                 * canvas. The existing captured MediaStreamTrack
-                 * therefore remains alive and WebRTC does not
-                 * renegotiate.
-                 */
-            },
-            [selectAvatar],
-        );
-
-    const handleUseAvatar =
-        useCallback(async () => {
-            if (
-                !selectedAvatar ||
-                !isVideoCall ||
-                !isConnected ||
-                !isCameraEnabled ||
-                !avatarVideoTrack
-            ) {
-                return;
-            }
-
-            try {
-                if (!isAvatarActive) {
-                    await toggleAvatar();
-                }
-
-                setIsAvatarPickerOpen(
-                    false,
-                );
-            } catch {
-                /*
-                 * Error state is owned by useAvatarMedia.
-                 */
-            }
-        }, [
-            avatarVideoTrack,
-            isAvatarActive,
-            isCameraEnabled,
-            isConnected,
-            isVideoCall,
-            selectedAvatar,
-            toggleAvatar,
-        ]);
-
-    const handleUseCamera =
-        useCallback(async () => {
-            if (!isAvatarActive) {
-                setIsAvatarPickerOpen(
-                    false,
-                );
-                return;
-            }
-
+    const handleCameraToggle = useCallback(async () => {
+        /*
+         * Avatar mode uses the avatar track as the
+         * WebRTC video sender track. Camera-off must
+         * therefore restore the physical camera first.
+         */
+        if (isAvatarActive) {
             try {
                 await disableAvatar();
-                setIsAvatarPickerOpen(
-                    false,
-                );
             } catch {
-                /*
-                 * Keep the picker open if restoration fails.
-                 */
+                return;
             }
-        }, [
-            disableAvatar,
-            isAvatarActive,
-        ]);
+        }
 
-    const toggleSpeaker =
-        useCallback(() => {
-            setIsSpeakerEnabled(
-                (current) => !current,
-            );
-        }, []);
+        toggleCamera();
+    }, [disableAvatar, isAvatarActive, toggleCamera]);
+
+    const handleSelectAvatar = useCallback(
+        (avatar: AvatarDefinition) => {
+            selectAvatar(avatar);
+
+            /*
+             * Do not disable avatar mode here.
+             *
+             * AvatarCanvas receives the new definition and
+             * AvatarEngine replaces the renderer on the same
+             * canvas. The existing captured MediaStreamTrack
+             * therefore remains alive and WebRTC does not
+             * renegotiate.
+             */
+        },
+        [selectAvatar],
+    );
+
+    const handleUseAvatar = useCallback(async () => {
+        if (
+            !selectedAvatar ||
+            !isVideoCall ||
+            !isConnected ||
+            !isCameraEnabled ||
+            !avatarVideoTrack
+        ) {
+            return;
+        }
+
+        try {
+            if (!isAvatarActive) {
+                await toggleAvatar();
+            }
+
+            setIsAvatarPickerOpen(false);
+        } catch {
+            /*
+             * Error state is owned by useAvatarMedia.
+             */
+        }
+    }, [
+        avatarVideoTrack,
+        isAvatarActive,
+        isCameraEnabled,
+        isConnected,
+        isVideoCall,
+        selectedAvatar,
+        toggleAvatar,
+    ]);
+
+    const handleUseCamera = useCallback(async () => {
+        if (!isAvatarActive) {
+            setIsAvatarPickerOpen(false);
+            return;
+        }
+
+        try {
+            await disableAvatar();
+
+            setIsAvatarPickerOpen(false);
+        } catch {
+            /*
+             * Keep the picker open if restoration fails.
+             */
+        }
+    }, [disableAvatar, isAvatarActive]);
+
+    const toggleSpeaker = useCallback(() => {
+        setIsSpeakerEnabled((current) => !current);
+    }, []);
 
     const isRinging =
         Boolean(activeCall) &&
         isIncoming &&
-        activeCall?.state ===
-            CALL_STATE.RINGING;
+        activeCall?.state === CALL_STATE.RINGING;
 
     useCallRingtone(isRinging);
 
+    /*
+     * Load the other participant's profile.
+     *
+     * Wait for our own user id: without it, "the other member"
+     * could resolve to ourselves.
+     */
     useEffect(() => {
-        if (!activeCall) {
+        if (!conversationId || !myUserId) {
             return;
         }
 
-        const call =
-            activeCall;
-
         let cancelled = false;
 
-        async function loadProfile() {
+        async function loadProfile(id: string, userId: string) {
             try {
-                const response =
-                    await getConversation(
-                        call.conversationId,
-                    );
+                const response = await getConversation(id);
 
-                const otherMember =
-                    response.conversation.members.find(
-                        (member) =>
-                            member.userId !==
-                            myParticipant?.userId,
-                    );
+                const otherMember = response.conversation.members.find(
+                    (member) => member.userId !== userId,
+                );
 
-                if (
-                    !cancelled &&
-                    otherMember
-                ) {
-                    setProfile({
-                        displayName:
-                            otherMember.user
-                                .displayName ||
-                            "Miyor user",
-                        username:
-                            otherMember.user
-                                .username,
-                        profilePictureUrl:
-                            otherMember.user
-                                .profilePictureUrl ??
-                            null,
-                    });
+                if (cancelled || !otherMember) {
+                    return;
                 }
+
+                setLoadedProfile({
+                    conversationId: id,
+                    profile: {
+                        displayName:
+                            otherMember.user.displayName || "Miyor user",
+                        username: otherMember.user.username,
+                        profilePictureUrl:
+                            otherMember.user.profilePictureUrl ?? null,
+                    },
+                });
             } catch {
                 /*
                  * Keep fallback profile.
@@ -882,16 +809,12 @@ export function CallOverlay() {
             }
         }
 
-        void loadProfile();
+        void loadProfile(conversationId, myUserId);
 
         return () => {
             cancelled = true;
         };
-    }, [
-        activeCall?.conversationId,
-        activeCall?.id,
-        myParticipant?.userId,
-    ]);
+    }, [conversationId, myUserId]);
 
     useEffect(() => {
         if (!isConnected) {
@@ -899,81 +822,53 @@ export function CallOverlay() {
             return;
         }
 
-        const startedAt =
-            activeCall?.connectedAt
-                ? new Date(
-                      activeCall.connectedAt,
-                  ).getTime()
-                : Date.now();
+        const startedAt = activeCall?.connectedAt
+            ? new Date(activeCall.connectedAt).getTime()
+            : Date.now();
 
         const tick = () => {
             setElapsed(
-                Math.max(
-                    0,
-                    Math.floor(
-                        (Date.now() -
-                            startedAt) /
-                            1000,
-                    ),
-                ),
+                Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
             );
         };
 
         tick();
 
-        const timer =
-            window.setInterval(
-                tick,
-                1000,
-            );
+        const timer = window.setInterval(tick, 1000);
 
-        return () =>
-            window.clearInterval(
-                timer,
-            );
-    }, [
-        isConnected,
-        activeCall?.connectedAt,
-    ]);
+        return () => window.clearInterval(timer);
+    }, [isConnected, activeCall?.connectedAt]);
+
+    /*
+     * A recovered avatar clears the local dismissal, so a later
+     * error is shown again.
+     */
+    useEffect(() => {
+        if (!avatarError) {
+            setDismissedAvatarError(null);
+        }
+    }, [avatarError]);
 
     useEffect(() => {
-        if (!error && !avatarError) {
+        if (!displayedError) {
             return;
         }
 
-        const timer =
-            window.setTimeout(
-                clearError,
-                5000,
-            );
+        const timer = window.setTimeout(dismissError, 5000);
 
-        return () =>
-            window.clearTimeout(
-                timer,
-            );
-    }, [
-        error,
-        avatarError,
-        clearError,
-    ]);
+        return () => window.clearTimeout(timer);
+    }, [displayedError, dismissError]);
 
     useEffect(() => {
         if (!isTerminal) {
             return;
         }
 
-        const timer =
-            window.setTimeout(
-                () => {
-                    reset();
-                },
-                1400,
-            );
+        const timer = window.setTimeout(() => {
+            reset();
+        }, 1400);
 
-        return () =>
-            window.clearTimeout(
-                timer,
-            );
+        return () => window.clearTimeout(timer);
     }, [isTerminal, reset]);
 
     /*
@@ -984,10 +879,7 @@ export function CallOverlay() {
     useEffect(() => {
         if (
             isAvatarActive &&
-            (!isVideoCall ||
-                !isAccepted ||
-                !isConnected ||
-                !isCameraEnabled)
+            (!isVideoCall || !isAccepted || !isConnected || !isCameraEnabled)
         ) {
             void disableAvatar().catch(() => {
                 /*
@@ -1009,20 +901,10 @@ export function CallOverlay() {
      * no longer be used.
      */
     useEffect(() => {
-        if (
-            !isVideoCall ||
-            !isConnected ||
-            !isCameraEnabled
-        ) {
-            setIsAvatarPickerOpen(
-                false,
-            );
+        if (!isVideoCall || !isConnected || !isCameraEnabled) {
+            setIsAvatarPickerOpen(false);
         }
-    }, [
-        isCameraEnabled,
-        isConnected,
-        isVideoCall,
-    ]);
+    }, [isCameraEnabled, isConnected, isVideoCall]);
 
     if (!activeCall) {
         return null;
@@ -1033,53 +915,36 @@ export function CallOverlay() {
             <EndedCallView
                 profile={profile}
                 type={activeCall.type}
-                failed={
-                    activeCall.state ===
-                    CALL_STATE.FAILED
-                }
+                failed={activeCall.state === CALL_STATE.FAILED}
             />
         );
     }
 
     if (isIncoming) {
-        return (
-            <IncomingCallModal />
-        );
+        return <IncomingCallModal />;
     }
 
     if (isOutgoing) {
-        return (
-            <OutgoingCallModal />
-        );
+        return <OutgoingCallModal />;
     }
 
-    const isVideo =
-        activeCall.type ===
-        CALL_TYPE.VIDEO;
+    const isVideo = activeCall.type === CALL_TYPE.VIDEO;
 
     const hasRemoteVideo =
         isVideo &&
         remoteVideoEnabled &&
         Boolean(
-            remoteStream?.getVideoTracks()
-                .some(
-                    (track) =>
-                        track.readyState ===
-                        "live",
-                ),
+            remoteStream
+                ?.getVideoTracks()
+                .some((track) => track.readyState === "live"),
         );
-
-    const displayedError =
-        avatarError ?? error;
 
     return (
         <div className="fixed inset-0 z-[100] overflow-hidden bg-slate-950 text-white">
             <div className="absolute inset-0">
                 {hasRemoteVideo ? (
                     <VideoSurface
-                        stream={
-                            remoteStream
-                        }
+                        stream={remoteStream}
                         muted
                         className="h-full w-full object-cover"
                     />
@@ -1089,11 +954,7 @@ export function CallOverlay() {
 
                         <div className="relative flex flex-col items-center">
                             <div className="rounded-full p-2 ring-1 ring-white/10">
-                                <Avatar
-                                    profile={
-                                        profile
-                                    }
-                                />
+                                <Avatar profile={profile} />
                             </div>
 
                             <div className="mt-7 h-1.5 w-20 overflow-hidden rounded-full bg-white/10">
@@ -1103,95 +964,56 @@ export function CallOverlay() {
                     </div>
                 )}
 
-                {isVideo &&
-                    localStream && (
-                        <div
-                            className={[
-                                "absolute right-4 top-4 overflow-hidden rounded-2xl",
-                                "border border-white/20 bg-slate-900",
-                                "shadow-2xl shadow-black/40",
-                                "sm:right-6 sm:top-6",
-                                isAvatarActive
-                                    ? "h-44 w-72 sm:h-56 sm:w-[30rem]"
-                                    : "h-36 w-28 sm:h-48 sm:w-36",
-                            ].join(" ")}
-                        >
-                            {isAvatarActive &&
-                            selectedAvatar ? (
-                                <AvatarPreview
-                                    cameraStream={
-                                        localStream
-                                    }
-                                    avatar={
-                                        selectedAvatar
-                                    }
-                                    trackingEnabled
-                                    active
-                                    onAvatarCanvasReady={
-                                        handleAvatarCanvasReady
-                                    }
-                                />
-                            ) : isCameraEnabled ? (
-                                <VideoSurface
-                                    stream={
-                                        localStream
-                                    }
-                                    muted
-                                    className="h-full w-full object-cover"
-                                />
-                            ) : (
-                                <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
-                                    <Avatar
-                                        profile={{
-                                            displayName:
-                                                "You",
-                                        }}
-                                        size="small"
-                                    />
-                                </div>
-                            )}
+                {isVideo && localStream && (
+                    <div
+                        className={[
+                            "absolute right-4 top-4 overflow-hidden rounded-2xl",
+                            "border border-white/20 bg-slate-900",
+                            "shadow-2xl shadow-black/40",
+                            "sm:right-6 sm:top-6",
+                            isAvatarActive
+                                ? "h-44 w-72 sm:h-56 sm:w-[30rem]"
+                                : "h-36 w-28 sm:h-48 sm:w-36",
+                        ].join(" ")}
+                    >
+                        {selectedAvatar &&
+                        (isAvatarActive || localVideoSource === "avatar") ? (
+                            <AvatarPreview
+                                cameraStream={localStream}
+                                avatar={selectedAvatar}
+                                trackingEnabled={isAvatarActive}
+                                active={isAvatarActive}
+                                onAvatarCanvasReady={handleAvatarCanvasReady}
+                            />
+                        ) : isCameraEnabled ? (
+                            <VideoSurface
+                                stream={localStream}
+                                muted
+                                className="h-full w-full object-cover"
+                            />
+                        ) : (
+                            <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
+                                <Avatar profile={SELF_PROFILE} size="small" />
+                            </div>
+                        )}
 
-                            <span className="absolute bottom-2 left-2 rounded-full bg-black/50 px-2.5 py-1 text-[10px] font-medium text-white/75 backdrop-blur">
-                                {isAvatarActive
-                                    ? `You · ${
-                                          selectedAvatar?.name ??
-                                          "Avatar"
-                                      }`
-                                    : "You"}
+                        <span className="absolute bottom-2 left-2 rounded-full bg-black/50 px-2.5 py-1 text-[10px] font-medium text-white/75 backdrop-blur">
+                            {isAvatarActive
+                                ? `You · ${selectedAvatar?.name ?? "Avatar"}`
+                                : "You"}
+                        </span>
+
+                        {isMuted && (
+                            <span className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-red-500/80 text-white shadow-lg">
+                                <MutedBadgeIcon />
                             </span>
-
-                            {isMuted && (
-                                <span className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-red-500/80 text-white shadow-lg">
-                                    <svg
-                                        viewBox="0 0 24 24"
-                                        className="h-4 w-4"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="1.8"
-                                        aria-hidden="true"
-                                    >
-                                        <path
-                                            d="M5 5l14 14"
-                                            strokeLinecap="round"
-                                        />
-
-                                        <path
-                                            d="M9.5 9.5V6a2.5 2.5 0 0 1 5 0v5"
-                                            strokeLinecap="round"
-                                        />
-                                    </svg>
-                                </span>
-                            )}
-                        </div>
-                    )}
+                        )}
+                    </div>
+                )}
 
                 <RemoteAudio
-                    stream={
-                        remoteStream
-                    }
-                    enabled={
-                        isSpeakerEnabled
-                    }
+                    stream={remoteStream}
+                    enabled={isSpeakerEnabled}
                 />
 
                 <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/45 via-transparent to-black/70" />
@@ -1208,18 +1030,14 @@ export function CallOverlay() {
                             <span className="h-1 w-1 rounded-full bg-white/30" />
 
                             <span className="text-xs text-white/45">
-                                {isVideo
-                                    ? "Video"
-                                    : "Voice"}
+                                {isVideo ? "Video" : "Voice"}
                             </span>
                         </div>
                     </div>
 
                     {isConnected && (
                         <div className="rounded-full border border-white/10 bg-black/30 px-3.5 py-2 text-sm font-medium tabular-nums text-white/85 backdrop-blur-xl">
-                            {formatDuration(
-                                elapsed,
-                            )}
+                            {formatDuration(elapsed)}
                         </div>
                     )}
                 </header>
@@ -1243,12 +1061,11 @@ export function CallOverlay() {
                                 </p>
                             )}
 
-                            {isVideo &&
-                                !remoteVideoEnabled && (
-                                    <p className="mt-2 inline-flex items-center rounded-full border border-white/10 bg-black/35 px-3 py-1.5 text-xs text-white/65 backdrop-blur-xl">
-                                        Camera off
-                                    </p>
-                                )}
+                            {isVideo && !remoteVideoEnabled && (
+                                <p className="mt-2 inline-flex items-center rounded-full border border-white/10 bg-black/35 px-3 py-1.5 text-xs text-white/65 backdrop-blur-xl">
+                                    Camera off
+                                </p>
+                            )}
                         </div>
 
                         {!remoteAudioEnabled && (
@@ -1262,38 +1079,18 @@ export function CallOverlay() {
                 <footer className="px-5 pb-8 sm:px-8">
                     {localStream && (
                         <div className="relative mb-5 flex items-center justify-center gap-3">
-                            {isAvatarPickerOpen &&
-                                isVideo && (
-                                    <AvatarPicker
-                                        avatars={
-                                            avatars
-                                        }
-                                        selectedAvatar={
-                                            selectedAvatar
-                                        }
-                                        isAvatarActive={
-                                            isAvatarActive
-                                        }
-                                        disabled={
-                                            !isConnected ||
-                                            !isCameraEnabled
-                                        }
-                                        onSelect={
-                                            handleSelectAvatar
-                                        }
-                                        onUseAvatar={
-                                            handleUseAvatar
-                                        }
-                                        onUseCamera={
-                                            handleUseCamera
-                                        }
-                                        onClose={() =>
-                                            setIsAvatarPickerOpen(
-                                                false,
-                                            )
-                                        }
-                                    />
-                                )}
+                            {isAvatarPickerOpen && isVideo && (
+                                <AvatarPicker
+                                    avatars={avatars}
+                                    selectedAvatar={selectedAvatar}
+                                    isAvatarActive={isAvatarActive}
+                                    disabled={!isConnected || !isCameraEnabled}
+                                    onSelect={handleSelectAvatar}
+                                    onUseAvatar={handleUseAvatar}
+                                    onUseCamera={handleUseCamera}
+                                    onClose={() => setIsAvatarPickerOpen(false)}
+                                />
+                            )}
 
                             <MediaButton
                                 active={!isMuted}
@@ -1302,132 +1099,32 @@ export function CallOverlay() {
                                         ? "Unmute microphone"
                                         : "Mute microphone"
                                 }
-                                onClick={
-                                    toggleMute
-                                }
+                                onClick={toggleMute}
                             >
-                                {isMuted ? (
-                                    <svg
-                                        viewBox="0 0 24 24"
-                                        className="h-6 w-6"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="1.8"
-                                        aria-hidden="true"
-                                    >
-                                        <path
-                                            d="M5 5l14 14"
-                                            strokeLinecap="round"
-                                        />
-
-                                        <path
-                                            d="M9.5 9.5V6a2.5 2.5 0 0 1 5 0v5"
-                                            strokeLinecap="round"
-                                        />
-
-                                        <path
-                                            d="M6.8 11.2a5.2 5.2 0 0 0 8.7 3.8M12 19v-3M9 19h6"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                        />
-                                    </svg>
-                                ) : (
-                                    <svg
-                                        viewBox="0 0 24 24"
-                                        className="h-6 w-6"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="1.8"
-                                        aria-hidden="true"
-                                    >
-                                        <rect
-                                            x="8"
-                                            y="3"
-                                            width="8"
-                                            height="12"
-                                            rx="4"
-                                        />
-
-                                        <path
-                                            d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                        />
-                                    </svg>
-                                )}
+                                <MicIcon muted={isMuted} />
                             </MediaButton>
 
                             {isVideo && (
                                 <>
                                     <MediaButton
-                                        active={
-                                            isCameraEnabled
-                                        }
+                                        active={isCameraEnabled}
                                         label={
                                             isCameraEnabled
                                                 ? "Turn camera off"
                                                 : "Turn camera on"
                                         }
-                                        onClick={() =>
-                                            void handleCameraToggle()
-                                        }
+                                        onClick={() => void handleCameraToggle()}
                                     >
-                                        {isCameraEnabled ? (
-                                            <svg
-                                                viewBox="0 0 24 24"
-                                                className="h-6 w-6"
-                                                fill="none"
-                                                stroke="currentColor"
-                                                strokeWidth="1.8"
-                                                aria-hidden="true"
-                                            >
-                                                <rect
-                                                    x="3"
-                                                    y="6"
-                                                    width="13"
-                                                    height="12"
-                                                    rx="2.5"
-                                                />
-
-                                                <path
-                                                    d="m16 10 5-3v10l-5-3z"
-                                                    strokeLinejoin="round"
-                                                />
-                                            </svg>
-                                        ) : (
-                                            <svg
-                                                viewBox="0 0 24 24"
-                                                className="h-6 w-6"
-                                                fill="none"
-                                                stroke="currentColor"
-                                                strokeWidth="1.8"
-                                                aria-hidden="true"
-                                            >
-                                                <path
-                                                    d="M3 3l18 18"
-                                                    strokeLinecap="round"
-                                                />
-
-                                                <path
-                                                    d="M9.5 6H14a2 2 0 0 1 2 2v2l5-3v10l-3.2-1.9M7 6.8A2 2 0 0 0 5 9v6a2 2 0 0 0 2 2h7"
-                                                    strokeLinecap="round"
-                                                    strokeLinejoin="round"
-                                                />
-                                            </svg>
-                                        )}
+                                        <CameraIcon off={!isCameraEnabled} />
                                     </MediaButton>
 
                                     <MediaButton
-                                        active={
-                                            isAvatarActive
-                                        }
+                                        active={isAvatarActive}
                                         disabled={
                                             !isCameraEnabled ||
                                             !isConnected ||
                                             !avatarVideoTrack ||
-                                            Boolean(
-                                                avatarError,
-                                            )
+                                            Boolean(visibleAvatarError)
                                         }
                                         label={
                                             isAvatarPickerOpen
@@ -1436,10 +1133,7 @@ export function CallOverlay() {
                                         }
                                         onClick={() =>
                                             setIsAvatarPickerOpen(
-                                                (
-                                                    current,
-                                                ) =>
-                                                    !current,
+                                                (current) => !current,
                                             )
                                         }
                                     >
@@ -1449,65 +1143,37 @@ export function CallOverlay() {
                             )}
 
                             <MediaButton
-                                active={
-                                    isSpeakerEnabled
-                                }
+                                active={isSpeakerEnabled}
                                 label={
                                     isSpeakerEnabled
                                         ? "Turn speaker off"
                                         : "Turn speaker on"
                                 }
-                                onClick={
-                                    toggleSpeaker
-                                }
+                                onClick={toggleSpeaker}
                             >
-                                <SpeakerIcon
-                                    muted={
-                                        !isSpeakerEnabled
-                                    }
-                                />
+                                <SpeakerIcon muted={!isSpeakerEnabled} />
                             </MediaButton>
                         </div>
                     )}
 
                     <CallControls
-                        state={
-                            activeCall.state
-                        }
-                        type={
-                            activeCall.type
-                        }
+                        state={activeCall.state}
+                        type={activeCall.type}
                         isIncoming={false}
                         isOutgoing={false}
-                        isAccepted={
-                            isAccepted
-                        }
-                        isConnected={
-                            isConnected
-                        }
-                        isActionPending={
-                            isActionPending
-                        }
-                        onAccept={() =>
-                            void accept()
-                        }
-                        onDecline={() =>
-                            void decline()
-                        }
-                        onCancel={() =>
-                            void cancel()
-                        }
-                        onEnd={() =>
-                            void end()
-                        }
+                        isAccepted={isAccepted}
+                        isConnected={isConnected}
+                        isActionPending={isActionPending}
+                        onAccept={() => void accept()}
+                        onDecline={() => void decline()}
+                        onCancel={() => void cancel()}
+                        onEnd={() => void end()}
                     />
 
                     {displayedError && (
                         <button
                             type="button"
-                            onClick={
-                                clearError
-                            }
+                            onClick={dismissError}
                             className="mx-auto mt-4 block max-w-md rounded-xl border border-red-300/20 bg-red-500/10 px-4 py-3 text-left text-xs text-red-100 backdrop-blur-xl"
                         >
                             {displayedError}

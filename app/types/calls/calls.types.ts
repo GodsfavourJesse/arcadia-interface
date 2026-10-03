@@ -6,6 +6,14 @@ export const CALL_TYPE = {
 export type CallType =
     (typeof CALL_TYPE)[keyof typeof CALL_TYPE];
 
+export const CALL_VIDEO_SOURCE = {
+    CAMERA: "camera",
+    AVATAR: "avatar",
+} as const;
+
+export type CallVideoSource =
+    (typeof CALL_VIDEO_SOURCE)[keyof typeof CALL_VIDEO_SOURCE];
+
 export const CALL_STATE = {
     INITIATING: "initiating",
     RINGING: "ringing",

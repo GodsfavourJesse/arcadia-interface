@@ -23,6 +23,7 @@ import type {
     Call,
     CallParticipant,
     CallType,
+    CallVideoSource,
 } from "@/app/types/calls/calls.types";
 
 import type {
@@ -42,11 +43,15 @@ type CallStoreState = {
     isActionPending: boolean;
 
     error: string | null;
+    localVideoSource: CallVideoSource;
+    localAvatarId: string | null;
 
     startCall: (input: {
         conversationId: string;
         calleeId: string;
         type: CallType;
+        initialVideoSource?: CallVideoSource;
+        avatarId?: string | null;
     }) => Promise<void>;
 
     hydrateActiveCall: () => Promise<void>;
@@ -123,6 +128,8 @@ export const useCallStore =
             isHydrating: false,
             isActionPending: false,
             error: null,
+            localVideoSource: "camera",
+            localAvatarId: null,
 
             startCall: async (input) => {
                 const current =
@@ -144,13 +151,21 @@ export const useCallStore =
                 set({
                     isStarting: true,
                     error: null,
+                    localVideoSource:
+                        input.initialVideoSource ?? "camera",
+                    localAvatarId:
+                        input.avatarId ?? null,
                 });
 
                 try {
                     const response =
-                        await createCallRequest(
-                            input,
-                        );
+                        await createCallRequest({
+                            conversationId:
+                                input.conversationId,
+                            calleeId:
+                                input.calleeId,
+                            type: input.type,
+                        });
 
                     const returnedCall =
                         response.data;
@@ -477,6 +492,10 @@ export const useCallStore =
                     return;
                 }
 
+                const preserveLocalMedia =
+                    get().isStarting ||
+                    current?.id === event.call.id;
+
                 set({
                     activeCall:
                         event.call,
@@ -485,6 +504,13 @@ export const useCallStore =
                     isStarting: false,
                     isActionPending: false,
                     error: null,
+                    ...(preserveLocalMedia
+                        ? {}
+                        : {
+                              localVideoSource:
+                                  "camera",
+                              localAvatarId: null,
+                          }),
                 });
             },
 
@@ -501,6 +527,8 @@ export const useCallStore =
                     isHydrating: false,
                     isActionPending: false,
                     error: null,
+                    localVideoSource: "camera",
+                    localAvatarId: null,
                 });
             },
         }),

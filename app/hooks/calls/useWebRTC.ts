@@ -22,6 +22,7 @@ import type {
 
 import type {
     CallType,
+    CallVideoSource,
 } from "@/app/types/calls/calls.types";
 
 import type {
@@ -56,6 +57,7 @@ type UseWebRTCOptions = {
     callType: CallType | null;
     isCaller: boolean;
     enabled: boolean;
+    initialVideoSource?: CallVideoSource;
 
     onConnected?: () => void;
     onFailed?: (error: Error) => void;
@@ -66,6 +68,7 @@ export function useWebRTC({
     callType,
     isCaller,
     enabled,
+    initialVideoSource = "camera",
     onConnected,
     onFailed,
 }: UseWebRTCOptions) {
@@ -157,6 +160,9 @@ export function useWebRTC({
     const isCallerRef =
         useRef(isCaller);
 
+    const initialVideoSourceRef =
+        useRef<CallVideoSource>(initialVideoSource);
+
     const enabledRef =
         useRef(enabled);
 
@@ -236,6 +242,11 @@ export function useWebRTC({
         isCallerRef.current =
             isCaller;
     }, [isCaller]);
+
+    useEffect(() => {
+        initialVideoSourceRef.current =
+            initialVideoSource;
+    }, [initialVideoSource]);
 
     useEffect(() => {
         enabledRef.current =
@@ -1935,7 +1946,8 @@ export function useWebRTC({
                     return;
                 }
 
-                if (callType === "video") {
+                if (callType === "video" &&
+                    initialVideoSourceRef.current === "avatar") {
                     setConnectionState(
                         "connecting",
                     );
