@@ -14,7 +14,6 @@ import { useFaceTracking } from "@/app/hooks/avatar/useFaceTracking";
 
 import type {
     AvatarDefinition,
-    AvatarTrackingState,
 } from "@/app/types/avatar/avatar.types";
 
 type AvatarPreviewProps = {
@@ -87,20 +86,20 @@ export function AvatarPreview({
      * Face tracking remains entirely local.
      * No landmarks are sent to the backend.
      */
-    const { tracking } = useFaceTracking({
+    /*
+     * Use the mutable trackingRef directly for rendering.
+     *
+     * The hook throttles React state for UI updates, but the renderer
+     * must consume the inference-frequency state to avoid introducing
+     * an unnecessary ~100 ms control-path delay.
+     */
+    const { trackingRef } = useFaceTracking({
         video: videoElement,
         enabled:
             trackingEnabled &&
             cameraStream !== null &&
             avatar !== null,
     });
-
-    const trackingRef =
-        useRef<AvatarTrackingState>(tracking);
-
-    useEffect(() => {
-        trackingRef.current = tracking;
-    }, [tracking]);
 
     /*
      * Keep the canvas callback stable.
@@ -176,6 +175,7 @@ export function AvatarPreview({
                 {avatar ? (
                     <AvatarCanvas
                         avatar={avatar}
+                        cameraVideo={videoElement}
                         renderEnabled={active}
                         trackingRef={trackingRef}
                         onCanvasReady={

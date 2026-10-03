@@ -79,6 +79,7 @@ export type PortraitProOptions = {
  * - brow retargeting
  * - mouth/jaw retargeting
  * - feathered face masking
+ * - live-camera background compositing
  * - local portrait enhancement
  *
  * It intentionally remains a renderer, so WebRTC never receives raw
@@ -94,6 +95,14 @@ export class PortraitProRenderer implements AvatarRenderer {
     private readonly options: Required<PortraitProOptions>;
 
     private image: HTMLImageElement | null = null;
+
+    /**
+     * Local physical camera source. The final canvas becomes the
+     * outgoing WebRTC video track, so the remote peer receives the
+     * composited face-swap result rather than the raw camera track.
+     */
+    private cameraSource: HTMLVideoElement | null = null;
+
     private sourceSurface: HTMLCanvasElement | null = null;
     private backgroundSurface: HTMLCanvasElement | null = null;
     private sourceLandmarks: readonly PuppetLandmark[] = [];
@@ -229,6 +238,12 @@ export class PortraitProRenderer implements AvatarRenderer {
         this.renderStatic();
     }
 
+    setCameraSource(
+        video: HTMLVideoElement | null,
+    ): void {
+        this.cameraSource = video;
+    }
+
     update(tracking: AvatarTrackingState): void {
         if (this.disposed || !this.image) {
             return;
@@ -288,6 +303,7 @@ export class PortraitProRenderer implements AvatarRenderer {
         this.disposed = true;
 
         this.image = null;
+        this.cameraSource = null;
         this.sourceSurface = null;
         this.backgroundSurface = null;
         this.sourceLandmarks = [];
@@ -387,11 +403,7 @@ export class PortraitProRenderer implements AvatarRenderer {
     }
 
     private renderStatic(): void {
-        const surface =
-            this.backgroundSurface ??
-            this.sourceSurface;
-
-        if (!surface || this.disposed) {
+        if (this.disposed) {
             return;
         }
 
@@ -404,14 +416,30 @@ export class PortraitProRenderer implements AvatarRenderer {
             this.height,
         );
 
-        drawCover(
-            this.context,
-            surface,
-            surface.width,
-            surface.height,
-            this.width,
-            this.height,
-        );
+        /*
+         * Keep the outgoing surface representative of the live scene
+         * even before a face is detected. Once tracking is available,
+         * renderPortrait() replaces only the face region.
+         */
+        if (this.drawLiveCameraBackground()) {
+            this.context.restore();
+            return;
+        }
+
+        const surface =
+            this.backgroundSurface ??
+            this.sourceSurface;
+
+        if (surface) {
+            drawCover(
+                this.context,
+                surface,
+                surface.width,
+                surface.height,
+                this.width,
+                this.height,
+            );
+        }
 
         this.context.restore();
     }
@@ -734,19 +762,26 @@ export class PortraitProRenderer implements AvatarRenderer {
             this.height,
         );
 
-        const background =
-            this.backgroundSurface ??
-            surface;
+        if (!this.drawLiveCameraBackground()) {
+            const background =
+                this.backgroundSurface ??
+                surface;
 
-        drawCover(
-            this.context,
-            background,
-            background.width,
-            background.height,
-            this.width,
-            this.height,
-        );
+            drawCover(
+                this.context,
+                background,
+                background.width,
+                background.height,
+                this.width,
+                this.height,
+            );
+        }
 
+        /*
+         * The warped source portrait is clipped to the live face oval.
+         * The user's real body/background therefore remain visible while
+         * the selected portrait replaces the camera face.
+         */
         this.context.drawImage(
             faceLayer,
             0,
@@ -754,6 +789,31 @@ export class PortraitProRenderer implements AvatarRenderer {
         );
 
         this.context.restore();
+    }
+
+    private drawLiveCameraBackground(): boolean {
+        const video = this.cameraSource;
+
+        if (
+            !video ||
+            video.readyState <
+                HTMLMediaElement.HAVE_CURRENT_DATA ||
+            video.videoWidth <= 0 ||
+            video.videoHeight <= 0
+        ) {
+            return false;
+        }
+
+        drawCover(
+            this.context,
+            video,
+            video.videoWidth,
+            video.videoHeight,
+            this.width,
+            this.height,
+        );
+
+        return true;
     }
 
     private drawExpressionRetargeting(
@@ -1325,13 +1385,33 @@ function drawFeatheredFaceMask(
         return;
     }
 
+    const bounds = pointsBounds(points);
+    const centerX =
+        (bounds.minX + bounds.maxX) * 0.5;
+    const centerY =
+        (bounds.minY + bounds.maxY) * 0.5;
+    const expansion = 1.025;
+
+    const expandedPoints = points.map(
+        (point) => ({
+            x:
+                centerX +
+                (point.x - centerX) *
+                    expansion,
+            y:
+                centerY +
+                (point.y - centerY) *
+                    expansion,
+        }),
+    );
+
     context.save();
     context.clearRect(0, 0, width, height);
     context.fillStyle = "white";
     context.filter = "blur(5px)";
     context.beginPath();
 
-    const first = points[0];
+    const first = expandedPoints[0];
     if (!first) {
         context.restore();
         return;
@@ -1339,8 +1419,12 @@ function drawFeatheredFaceMask(
 
     context.moveTo(first.x, first.y);
 
-    for (let i = 1; i < points.length; i += 1) {
-        const point = points[i];
+    for (
+        let i = 1;
+        i < expandedPoints.length;
+        i += 1
+    ) {
+        const point = expandedPoints[i];
         if (!point) {
             continue;
         }

@@ -36,6 +36,12 @@ export interface AvatarRenderer {
     update(tracking: AvatarTrackingState): void;
 
     /**
+     * Optional local camera source used by face-swap renderers.
+     * Camera frames remain local to the browser.
+     */
+    setCameraSource?(video: HTMLVideoElement | null): void;
+
+    /**
      * Update the renderer and camera to match the available canvas size.
      */
     resize(width: number, height: number): void;

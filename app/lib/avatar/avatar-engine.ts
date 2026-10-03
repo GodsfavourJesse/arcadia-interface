@@ -40,6 +40,8 @@ export class AvatarEngine {
 
     private operationId = 0;
 
+    private cameraSource: HTMLVideoElement | null = null;
+
     constructor(createRenderer: AvatarRendererFactory) {
         this.createRenderer = createRenderer;
     }
@@ -74,6 +76,9 @@ export class AvatarEngine {
 
         try {
             await nextRenderer.load(avatar);
+            nextRenderer.setCameraSource?.(
+                this.cameraSource,
+            );
         } catch (error) {
             nextRenderer.dispose();
             throw error;
@@ -98,6 +103,16 @@ export class AvatarEngine {
         if (previousRenderer && previousRenderer !== nextRenderer) {
             previousRenderer.dispose();
         }
+    }
+
+    /**
+     * Updates the optional local camera source used by face-swap renderers.
+     */
+    setCameraSource(
+        video: HTMLVideoElement | null,
+    ): void {
+        this.cameraSource = video;
+        this.renderer?.setCameraSource?.(video);
     }
 
     /**

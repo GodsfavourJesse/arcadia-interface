@@ -24,6 +24,13 @@ const MIN_RENDER_INTERVAL = 1000 / MAX_RENDER_FPS;
 const MIN_TRIANGLE_AREA = 0.000001;
 const FACE_PADDING = 0.08;
 
+// MediaPipe canonical face oval. Used only for the local compositing mask.
+const FACE_OVAL_INDICES = [
+    10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288,
+    397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136,
+    172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109,
+] as const;
+
 /**
  * The renderer deliberately uses only x/y/z.
  *
@@ -58,6 +65,10 @@ type PuppetLandmark = Pick<AvatarLandmark, "x" | "y" | "z">;
 export class ImagePuppetRenderer implements AvatarRenderer {
     private readonly canvas: HTMLCanvasElement;
     private readonly context: CanvasRenderingContext2D;
+    private readonly faceLayer: HTMLCanvasElement;
+    private readonly faceContext: CanvasRenderingContext2D;
+    private readonly maskLayer: HTMLCanvasElement;
+    private readonly maskContext: CanvasRenderingContext2D;
 
     private image: HTMLImageElement | null = null;
     private sourceSurface: HTMLCanvasElement | null = null;
@@ -88,6 +99,19 @@ export class ImagePuppetRenderer implements AvatarRenderer {
         }
 
         this.context = context;
+
+        this.faceLayer = document.createElement("canvas");
+        this.maskLayer = document.createElement("canvas");
+
+        const faceContext = this.faceLayer.getContext("2d", { alpha: true, desynchronized: true });
+        const maskContext = this.maskLayer.getContext("2d", { alpha: true, desynchronized: true });
+
+        if (!faceContext || !maskContext) {
+            throw new Error("Unable to create portrait face compositing surfaces.");
+        }
+
+        this.faceContext = faceContext;
+        this.maskContext = maskContext;
 
         this.context.imageSmoothingEnabled = true;
         this.context.imageSmoothingQuality = "high";
@@ -173,7 +197,7 @@ export class ImagePuppetRenderer implements AvatarRenderer {
             return;
         }
 
-        this.renderPuppet(tracking, tracking.landmarks);
+        this.renderPuppet(tracking);
     }
 
     resize(width: number, height: number): void {
@@ -193,6 +217,10 @@ export class ImagePuppetRenderer implements AvatarRenderer {
 
         this.canvas.width = this.width;
         this.canvas.height = this.height;
+        this.faceLayer.width = this.width;
+        this.faceLayer.height = this.height;
+        this.maskLayer.width = this.width;
+        this.maskLayer.height = this.height;
 
         this.context.imageSmoothingEnabled = true;
         this.context.imageSmoothingQuality = "high";
@@ -264,253 +292,109 @@ export class ImagePuppetRenderer implements AvatarRenderer {
 
     private renderPuppet(
         tracking: AvatarTrackingState,
-        liveLandmarks: readonly AvatarLandmark[],
     ): void {
         const image = this.image;
         const surface = this.sourceSurface;
+        const liveLandmarks = tracking.landmarks;
 
-        if (!image || !surface || this.disposed) {
-            return;
-        }
-
-        if (
-            this.sourceLandmarks.length !==
-            liveLandmarks.length
-        ) {
+        if (!image || !surface || this.disposed) return;
+        if (this.sourceLandmarks.length !== liveLandmarks.length || this.triangles.length === 0) {
             this.renderStatic();
             return;
         }
 
-        const sourceBounds = getBounds(
-            this.sourceLandmarks,
-        );
+        const sourceBounds = getBounds(this.sourceLandmarks);
+        const liveBounds = getBounds(liveLandmarks);
+        const sourceWidth = Math.max(sourceBounds.maxX - sourceBounds.minX, 0.001);
+        const sourceHeight = Math.max(sourceBounds.maxY - sourceBounds.minY, 0.001);
+        const liveWidth = Math.max(liveBounds.maxX - liveBounds.minX, 0.001);
+        const liveHeight = Math.max(liveBounds.maxY - liveBounds.minY, 0.001);
 
-        const liveBounds = getBounds(
-            liveLandmarks,
-        );
-
-        const sourceWidth = Math.max(
-            sourceBounds.maxX -
-                sourceBounds.minX,
-            0.001,
-        );
-
-        const sourceHeight = Math.max(
-            sourceBounds.maxY -
-                sourceBounds.minY,
-            0.001,
-        );
-
-        const liveWidth = Math.max(
-            liveBounds.maxX -
-                liveBounds.minX,
-            0.001,
-        );
-
-        const liveHeight = Math.max(
-            liveBounds.maxY -
-                liveBounds.minY,
-            0.001,
-        );
-
-        /*
-         * We start with the original image.
-         *
-         * The facial triangles are then painted on top of it.
-         * This gives us a graceful fallback when the live face
-         * temporarily loses tracking.
-         */
+        // Render the untouched portrait first. Only the face region below is replaced.
         this.context.save();
-
-        this.context.setTransform(
-            1,
-            0,
-            0,
-            1,
-            0,
-            0,
-        );
-
-        this.context.clearRect(
-            0,
-            0,
-            this.width,
-            this.height,
-        );
-
-        drawCover(
-            this.context,
-            surface,
-            surface.width,
-            surface.height,
-            this.width,
-            this.height,
-        );
-
+        this.context.setTransform(1, 0, 0, 1, 0, 0);
+        this.context.clearRect(0, 0, this.width, this.height);
+        drawCover(this.context, surface, surface.width, surface.height, this.width, this.height);
         this.context.restore();
 
-        /*
-         * Keep the live face centered and preserve a little
-         * breathing room around it.
-         */
-        const paddedMinX = clamp01(
-            liveBounds.minX -
-                liveWidth * FACE_PADDING,
-        );
+        this.faceContext.setTransform(1, 0, 0, 1, 0, 0);
+        this.faceContext.clearRect(0, 0, this.width, this.height);
 
-        const paddedMaxX = clamp01(
-            liveBounds.maxX +
-                liveWidth * FACE_PADDING,
-        );
+        const paddedMinX = clamp01(liveBounds.minX - liveWidth * 0.12);
+        const paddedMaxX = clamp01(liveBounds.maxX + liveWidth * 0.12);
+        const paddedMinY = clamp01(liveBounds.minY - liveHeight * 0.12);
+        const paddedMaxY = clamp01(liveBounds.maxY + liveHeight * 0.10);
+        const paddedLiveWidth = Math.max(paddedMaxX - paddedMinX, 0.001);
+        const paddedLiveHeight = Math.max(paddedMaxY - paddedMinY, 0.001);
 
-        const paddedMinY = clamp01(
-            liveBounds.minY -
-                liveHeight * FACE_PADDING,
-        );
+        const mapSourceToCanvas = (landmark: PuppetLandmark): Point => ({
+            x: (paddedMinX + ((landmark.x - sourceBounds.minX) / sourceWidth) * paddedLiveWidth) * this.width,
+            y: (paddedMinY + ((landmark.y - sourceBounds.minY) / sourceHeight) * paddedLiveHeight) * this.height,
+        });
 
-        const paddedMaxY = clamp01(
-            liveBounds.maxY +
-                liveHeight * FACE_PADDING,
-        );
-
-        const paddedLiveWidth = Math.max(
-            paddedMaxX -
-                paddedMinX,
-            0.001,
-        );
-
-        const paddedLiveHeight = Math.max(
-            paddedMaxY -
-                paddedMinY,
-            0.001,
-        );
-
-        const mapSourceToCanvas = (
-            landmark: PuppetLandmark,
-        ): Point => {
-            const u =
-                (landmark.x -
-                    sourceBounds.minX) /
-                sourceWidth;
-
-            const v =
-                (landmark.y -
-                    sourceBounds.minY) /
-                sourceHeight;
-
-            return {
-                x:
-                    (paddedMinX +
-                        u *
-                            paddedLiveWidth) *
-                    this.width,
-
-                y:
-                    (paddedMinY +
-                        v *
-                            paddedLiveHeight) *
-                    this.height,
-            };
-        };
-
-        const sourceToImage = (
-            landmark: PuppetLandmark,
-        ): Point => ({
+        const sourceToImage = (landmark: PuppetLandmark): Point => ({
             x: landmark.x * surface.width,
             y: landmark.y * surface.height,
         });
 
-        /*
-         * Paint the warped facial triangles.
-         */
         for (const [a, b, c] of this.triangles) {
-            const sourceA =
-                this.sourceLandmarks[a];
+            const sourceA = this.sourceLandmarks[a];
+            const sourceB = this.sourceLandmarks[b];
+            const sourceC = this.sourceLandmarks[c];
+            const liveA = liveLandmarks[a];
+            const liveB = liveLandmarks[b];
+            const liveC = liveLandmarks[c];
+            if (!sourceA || !sourceB || !sourceC || !liveA || !liveB || !liveC) continue;
 
-            const sourceB =
-                this.sourceLandmarks[b];
+            const sourcePointA = sourceToImage(sourceA);
+            const sourcePointB = sourceToImage(sourceB);
+            const sourcePointC = sourceToImage(sourceC);
+            const destinationA = mapSourceToCanvas(liveA);
+            const destinationB = mapSourceToCanvas(liveB);
+            const destinationC = mapSourceToCanvas(liveC);
 
-            const sourceC =
-                this.sourceLandmarks[c];
-
-            const liveA =
-                liveLandmarks[a];
-
-            const liveB =
-                liveLandmarks[b];
-
-            const liveC =
-                liveLandmarks[c];
-
-            if (
-                !sourceA ||
-                !sourceB ||
-                !sourceC ||
-                !liveA ||
-                !liveB ||
-                !liveC
-            ) {
-                continue;
-            }
-
-            const sourcePointA =
-                sourceToImage(sourceA);
-
-            const sourcePointB =
-                sourceToImage(sourceB);
-
-            const sourcePointC =
-                sourceToImage(sourceC);
-
-            const destinationA =
-                mapSourceToCanvas(liveA);
-
-            const destinationB =
-                mapSourceToCanvas(liveB);
-
-            const destinationC =
-                mapSourceToCanvas(liveC);
-
-            if (
-                Math.abs(
-                    triangleArea2(
-                        sourcePointA,
-                        sourcePointB,
-                        sourcePointC,
-                    ),
-                ) < MIN_TRIANGLE_AREA
-            ) {
-                continue;
-            }
-
-            if (
-                Math.abs(
-                    triangleArea2(
-                        destinationA,
-                        destinationB,
-                        destinationC,
-                    ),
-                ) < MIN_TRIANGLE_AREA
-            ) {
-                continue;
-            }
+            if (Math.abs(triangleArea2(sourcePointA, sourcePointB, sourcePointC)) < MIN_TRIANGLE_AREA) continue;
+            if (Math.abs(triangleArea2(destinationA, destinationB, destinationC)) < MIN_TRIANGLE_AREA) continue;
 
             drawImageTriangle(
-                this.context,
+                this.faceContext,
                 surface,
-                sourcePointA,
-                sourcePointB,
-                sourcePointC,
-                destinationA,
-                destinationB,
-                destinationC,
+                sourcePointA, sourcePointB, sourcePointC,
+                destinationA, destinationB, destinationC,
             );
         }
 
-        this.renderExpressionCorrections(
-            tracking,
-            liveLandmarks,
-        );
+        // Expression corrections are applied to the generated face layer, not the raw portrait.
+        this.renderExpressionCorrections(tracking, liveLandmarks);
+
+        // Build a feathered face mask from MediaPipe's canonical face oval.
+        this.maskContext.setTransform(1, 0, 0, 1, 0, 0);
+        this.maskContext.clearRect(0, 0, this.width, this.height);
+        this.maskContext.save();
+        this.maskContext.filter = "blur(7px)";
+        this.maskContext.fillStyle = "rgba(255,255,255,1)";
+        this.maskContext.beginPath();
+
+        const oval = FACE_OVAL_INDICES;
+        oval.forEach((index, i) => {
+            const point = liveLandmarks[index];
+            if (!point) return;
+            const mapped = mapSourceToCanvas(point);
+            if (i === 0) this.maskContext.moveTo(mapped.x, mapped.y);
+            else this.maskContext.lineTo(mapped.x, mapped.y);
+        });
+        this.maskContext.closePath();
+        this.maskContext.fill();
+        this.maskContext.restore();
+
+        this.faceContext.globalCompositeOperation = "destination-in";
+        this.faceContext.drawImage(this.maskLayer, 0, 0);
+        this.faceContext.globalCompositeOperation = "source-over";
+
+        this.context.save();
+        this.context.globalCompositeOperation = "source-over";
+        this.context.drawImage(this.faceLayer, 0, 0);
+        this.context.restore();
     }
 
     /**
@@ -529,13 +413,13 @@ export class ImagePuppetRenderer implements AvatarRenderer {
             return;
         }
 
-        this.context.save();
+        this.faceContext.save();
 
         const leftBlink = tracking.eyes.leftBlink;
         const rightBlink = tracking.eyes.rightBlink;
 
         drawEyeCorrection(
-            this.context,
+            this.faceContext,
             liveLandmarks,
             [33, 160, 158, 133, 153, 144],
             leftBlink,
@@ -544,7 +428,7 @@ export class ImagePuppetRenderer implements AvatarRenderer {
         );
 
         drawEyeCorrection(
-            this.context,
+            this.faceContext,
             liveLandmarks,
             [362, 385, 387, 263, 373, 380],
             rightBlink,
@@ -553,14 +437,14 @@ export class ImagePuppetRenderer implements AvatarRenderer {
         );
 
         drawMouthCorrection(
-            this.context,
+            this.faceContext,
             liveLandmarks,
             tracking.mouth.open,
             tracking.mouth.smile,
             tracking.mouth.pucker,
         );
 
-        this.context.restore();
+        this.faceContext.restore();
     }
 }
 
