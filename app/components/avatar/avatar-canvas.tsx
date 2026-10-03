@@ -31,6 +31,13 @@ type AvatarCanvasProps = {
     avatar: AvatarDefinition;
 
     /*
+     * Controls whether the animation loop updates the renderer.
+     * The canvas remains mounted even when false so captureStream()
+     * can be created once and reused when avatar mode is activated.
+     */
+    renderEnabled?: boolean;
+
+    /*
      * This is the live tracking state.
      *
      * IMPORTANT:
@@ -46,6 +53,7 @@ type AvatarCanvasProps = {
 
 export function AvatarCanvas({
     avatar,
+    renderEnabled = true,
     trackingRef,
     onCanvasReady,
 }: AvatarCanvasProps) {

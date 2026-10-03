@@ -176,6 +176,7 @@ export function AvatarPreview({
                 {avatar ? (
                     <AvatarCanvas
                         avatar={avatar}
+                        renderEnabled={active}
                         trackingRef={trackingRef}
                         onCanvasReady={
                             handleAvatarCanvasReady

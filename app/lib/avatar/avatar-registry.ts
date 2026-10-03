@@ -23,7 +23,7 @@ export const AVATAR_REGISTRY: readonly AvatarDefinition[] = [
         name: "Miyor Default",
         type: AVATAR_TYPE.VRM,
         renderMode: AVATAR_RENDER_MODE.VRM,
-        thumbnailUrl: "/avatars/default-avatar.webp",
+        thumbnailUrl: "/avatars/default-avatar.svg",
         assetUrl: "/avatars/default-avatar.vrm",
         enabled: true,
         capabilities: {
