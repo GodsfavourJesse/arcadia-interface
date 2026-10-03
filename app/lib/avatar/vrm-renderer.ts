@@ -846,6 +846,10 @@ function smoothTracking(
                 filters.gazeY.value,
         },
 
+        brows: {
+            ...tracking.brows,
+        },
+
         mouth: {
             open:
                 filters.mouthOpen.value,

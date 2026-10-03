@@ -22,7 +22,7 @@ import {
 import {
     TwoDRenderer,
 } from "@/app/lib/avatar/two-d-renderer";
-import { ImagePuppetRenderer } from "@/app/lib/avatar/image-puppet-renderer";
+import { PortraitProRenderer } from "@/app/lib/avatar/portrait-pro-renderer";
 
 
 type AvatarCanvasProps = {
@@ -162,8 +162,13 @@ export function AvatarCanvas({
                             );
 
                         case AVATAR_TYPE.IMAGE:
-                            return new ImagePuppetRenderer(
+                            return new PortraitProRenderer(
                                 rendererCanvas,
+                                {
+                                    enhancement: "studio",
+                                    calibrationFrames: 18,
+                                    motionGain: 1,
+                                },
                             );
 
                         case AVATAR_TYPE.GLTF:

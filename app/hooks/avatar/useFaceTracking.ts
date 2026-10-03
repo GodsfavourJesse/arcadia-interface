@@ -16,6 +16,7 @@ import {
 } from "@mediapipe/tasks-vision";
 
 import type {
+    AvatarBrowState,
     AvatarEyeState,
     AvatarFaceState,
     AvatarHeadRotation,
@@ -58,9 +59,9 @@ const UI_UPDATE_INTERVAL = 100;
 /**
  * MediaPipe confidence configuration.
  */
-const MIN_FACE_DETECTION_CONFIDENCE = 0.35;
-const MIN_FACE_PRESENCE_CONFIDENCE = 0.35;
-const MIN_TRACKING_CONFIDENCE = 0.40;
+const MIN_FACE_DETECTION_CONFIDENCE = 0.50;
+const MIN_FACE_PRESENCE_CONFIDENCE = 0.50;
+const MIN_TRACKING_CONFIDENCE = 0.50;
 
 /**
  * Pose limits.
@@ -156,6 +157,13 @@ type TrackingFilters = {
 
     gazeX: ScalarFilter;
     gazeY: ScalarFilter;
+
+    browLeftInnerUp: ScalarFilter;
+    browRightInnerUp: ScalarFilter;
+    browLeftOuterUp: ScalarFilter;
+    browRightOuterUp: ScalarFilter;
+    browLeftDown: ScalarFilter;
+    browRightDown: ScalarFilter;
 };
 
 /**
@@ -228,6 +236,13 @@ function createFilters(): TrackingFilters {
 
         gazeX: createFilter(),
         gazeY: createFilter(),
+
+        browLeftInnerUp: createFilter(),
+        browRightInnerUp: createFilter(),
+        browLeftOuterUp: createFilter(),
+        browRightOuterUp: createFilter(),
+        browLeftDown: createFilter(),
+        browRightDown: createFilter(),
     };
 }
 
@@ -259,6 +274,15 @@ function createNeutralTracking(): AvatarTrackingState {
             rightBlink: 0,
             gazeX: 0,
             gazeY: 0,
+        },
+
+        brows: {
+            leftInnerUp: 0,
+            rightInnerUp: 0,
+            leftOuterUp: 0,
+            rightOuterUp: 0,
+            leftDown: 0,
+            rightDown: 0,
         },
 
         mouth: {
@@ -810,6 +834,22 @@ function extractEyes(
     };
 }
 
+function extractBrows(
+    result: FaceLandmarkerResult,
+): AvatarBrowState {
+    const score = (name: string) =>
+        getBlendshapeScore(result, name);
+
+    return {
+        leftInnerUp: clamp01(score("browInnerUp")),
+        rightInnerUp: clamp01(score("browInnerUp")),
+        leftOuterUp: clamp01(score("browOuterUpLeft")),
+        rightOuterUp: clamp01(score("browOuterUpRight")),
+        leftDown: clamp01(score("browDownLeft")),
+        rightDown: clamp01(score("browDownRight")),
+    };
+}
+
 function extractMouth(
     result: FaceLandmarkerResult,
 ): AvatarMouthState {
@@ -881,6 +921,9 @@ function applyTrackingResult(
 
     const rawEyes =
         extractEyes(result);
+
+    const rawBrows =
+        extractBrows(result);
 
     const rawMouth =
         extractMouth(result);
@@ -992,6 +1035,60 @@ function applyTrackingResult(
             filters.gazeY,
             rawEyes.gazeY,
             GAZE_RESPONSE,
+            EXPRESSION_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.brows.leftInnerUp =
+        smoothScalar(
+            filters.browLeftInnerUp,
+            rawBrows.leftInnerUp,
+            EXPRESSION_FAST_RESPONSE,
+            EXPRESSION_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.brows.rightInnerUp =
+        smoothScalar(
+            filters.browRightInnerUp,
+            rawBrows.rightInnerUp,
+            EXPRESSION_FAST_RESPONSE,
+            EXPRESSION_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.brows.leftOuterUp =
+        smoothScalar(
+            filters.browLeftOuterUp,
+            rawBrows.leftOuterUp,
+            EXPRESSION_FAST_RESPONSE,
+            EXPRESSION_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.brows.rightOuterUp =
+        smoothScalar(
+            filters.browRightOuterUp,
+            rawBrows.rightOuterUp,
+            EXPRESSION_FAST_RESPONSE,
+            EXPRESSION_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.brows.leftDown =
+        smoothScalar(
+            filters.browLeftDown,
+            rawBrows.leftDown,
+            EXPRESSION_FAST_RESPONSE,
+            EXPRESSION_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.brows.rightDown =
+        smoothScalar(
+            filters.browRightDown,
+            rawBrows.rightDown,
+            EXPRESSION_FAST_RESPONSE,
             EXPRESSION_FAST_RESPONSE,
             deltaSeconds,
         );
@@ -1526,47 +1623,37 @@ export function useFaceTracking({
 
                         setTracking({
                             faceDetected:
-                                trackingRef
-                                    .current
-                                    .faceDetected,
+                                trackingRef.current.faceDetected,
 
                             landmarks:
                                 trackingRef.current.landmarks,
 
                             face: {
-                                ...trackingRef
-                                    .current
-                                    .face,
+                                ...trackingRef.current.face,
                             },
 
                             nose: {
-                                ...trackingRef
-                                    .current
-                                    .nose,
+                                ...trackingRef.current.nose,
                             },
 
                             head: {
-                                ...trackingRef
-                                    .current
-                                    .head,
+                                ...trackingRef.current.head,
                             },
 
                             eyes: {
-                                ...trackingRef
-                                    .current
-                                    .eyes,
+                                ...trackingRef.current.eyes,
+                            },
+
+                            brows: {
+                                ...trackingRef.current.brows,
                             },
 
                             mouth: {
-                                ...trackingRef
-                                    .current
-                                    .mouth,
+                                ...trackingRef.current.mouth,
                             },
 
                             timestamp:
-                                trackingRef
-                                    .current
-                                    .timestamp,
+                                trackingRef.current.timestamp,
                         });
                     }
                 } catch (

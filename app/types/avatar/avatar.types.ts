@@ -108,6 +108,15 @@ export type AvatarLandmark = {
     z: number;
 };
 
+export type AvatarBrowState = {
+    leftInnerUp: number;
+    rightInnerUp: number;
+    leftOuterUp: number;
+    rightOuterUp: number;
+    leftDown: number;
+    rightDown: number;
+};
+
 export type AvatarMouthState = {
     open: number;
     smile: number;
@@ -129,6 +138,7 @@ export type AvatarTrackingState = {
     nose: AvatarNoseState;
     head: AvatarHeadRotation;
     eyes: AvatarEyeState;
+    brows: AvatarBrowState;
     mouth: AvatarMouthState;
     timestamp: number;
 };

@@ -60,6 +60,7 @@ export class ImagePuppetRenderer implements AvatarRenderer {
     private readonly context: CanvasRenderingContext2D;
 
     private image: HTMLImageElement | null = null;
+    private sourceSurface: HTMLCanvasElement | null = null;
 
     private sourceLandmarks: readonly PuppetLandmark[] = [];
 
@@ -109,16 +110,10 @@ export class ImagePuppetRenderer implements AvatarRenderer {
         }
 
         this.image = image;
+        this.sourceSurface = createEnhancedSurface(image);
         this.sourceLandmarks = [];
         this.triangles = [];
         this.lastRenderTime = 0;
-
-        console.log("[Avatar] ImagePuppetRenderer loaded image", {
-            avatarId: avatar.id,
-            assetUrl: avatar.assetUrl,
-            width: image.naturalWidth,
-            height: image.naturalHeight,
-        });
 
         try {
             const landmarker = await createImageLandmarker();
@@ -139,16 +134,6 @@ export class ImagePuppetRenderer implements AvatarRenderer {
 
                 this.triangles = triangulateFace(
                     this.sourceLandmarks,
-                );
-
-                console.log("[Avatar] ImagePuppetRenderer source face analyzed", {
-                    landmarkCount: this.sourceLandmarks.length,
-                    triangleCount: this.triangles.length,
-                });
-            } else {
-                console.warn(
-                    "[Avatar] Uploaded image contains no detectable face; using static portrait.",
-                    { landmarkCount: landmarks.length },
                 );
             }
         } catch (error) {
@@ -188,7 +173,7 @@ export class ImagePuppetRenderer implements AvatarRenderer {
             return;
         }
 
-        this.renderPuppet(tracking.landmarks);
+        this.renderPuppet(tracking, tracking.landmarks);
     }
 
     resize(width: number, height: number): void {
@@ -223,6 +208,7 @@ export class ImagePuppetRenderer implements AvatarRenderer {
         this.disposed = true;
 
         this.image = null;
+        this.sourceSurface = null;
         this.sourceLandmarks = [];
         this.triangles = [];
 
@@ -240,8 +226,9 @@ export class ImagePuppetRenderer implements AvatarRenderer {
 
     private renderStatic(): void {
         const image = this.image;
+        const surface = this.sourceSurface;
 
-        if (!image || this.disposed) {
+        if (!image || !surface || this.disposed) {
             return;
         }
 
@@ -265,7 +252,9 @@ export class ImagePuppetRenderer implements AvatarRenderer {
 
         drawCover(
             this.context,
-            image,
+            surface,
+            surface.width,
+            surface.height,
             this.width,
             this.height,
         );
@@ -274,11 +263,13 @@ export class ImagePuppetRenderer implements AvatarRenderer {
     }
 
     private renderPuppet(
+        tracking: AvatarTrackingState,
         liveLandmarks: readonly AvatarLandmark[],
     ): void {
         const image = this.image;
+        const surface = this.sourceSurface;
 
-        if (!image || this.disposed) {
+        if (!image || !surface || this.disposed) {
             return;
         }
 
@@ -349,7 +340,9 @@ export class ImagePuppetRenderer implements AvatarRenderer {
 
         drawCover(
             this.context,
-            image,
+            surface,
+            surface.width,
+            surface.height,
             this.width,
             this.height,
         );
@@ -423,13 +416,8 @@ export class ImagePuppetRenderer implements AvatarRenderer {
         const sourceToImage = (
             landmark: PuppetLandmark,
         ): Point => ({
-            x:
-                landmark.x *
-                image.naturalWidth,
-
-            y:
-                landmark.y *
-                image.naturalHeight,
+            x: landmark.x * surface.width,
+            y: landmark.y * surface.height,
         });
 
         /*
@@ -509,7 +497,7 @@ export class ImagePuppetRenderer implements AvatarRenderer {
 
             drawImageTriangle(
                 this.context,
-                image,
+                surface,
                 sourcePointA,
                 sourcePointB,
                 sourcePointC,
@@ -518,6 +506,61 @@ export class ImagePuppetRenderer implements AvatarRenderer {
                 destinationC,
             );
         }
+
+        this.renderExpressionCorrections(
+            tracking,
+            liveLandmarks,
+        );
+    }
+
+    /**
+     * Adds small, local expression corrections on top of the mesh.
+     *
+     * A pure texture warp cannot invent an eyelid that is absent from
+     * the source portrait. These corrections close the eyelids and
+     * open the mouth using the live MediaPipe blendshape values while
+     * keeping the operation entirely local and GPU/canvas friendly.
+     */
+    private renderExpressionCorrections(
+        tracking: AvatarTrackingState,
+        liveLandmarks: readonly AvatarLandmark[],
+    ): void {
+        if (liveLandmarks.length < 478) {
+            return;
+        }
+
+        this.context.save();
+
+        const leftBlink = tracking.eyes.leftBlink;
+        const rightBlink = tracking.eyes.rightBlink;
+
+        drawEyeCorrection(
+            this.context,
+            liveLandmarks,
+            [33, 160, 158, 133, 153, 144],
+            leftBlink,
+            tracking.eyes.gazeX,
+            tracking.eyes.gazeY,
+        );
+
+        drawEyeCorrection(
+            this.context,
+            liveLandmarks,
+            [362, 385, 387, 263, 373, 380],
+            rightBlink,
+            tracking.eyes.gazeX,
+            tracking.eyes.gazeY,
+        );
+
+        drawMouthCorrection(
+            this.context,
+            liveLandmarks,
+            tracking.mouth.open,
+            tracking.mouth.smile,
+            tracking.mouth.pucker,
+        );
+
+        this.context.restore();
     }
 }
 
@@ -957,6 +1000,190 @@ function getBounds(
     };
 }
 
+function createEnhancedSurface(
+    image: HTMLImageElement,
+): HTMLCanvasElement {
+    const maxDimension = 1600;
+    const scale = Math.min(
+        1,
+        maxDimension / Math.max(image.naturalWidth, image.naturalHeight),
+    );
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+    const context = canvas.getContext("2d", {
+        alpha: true,
+        desynchronized: true,
+    });
+
+    if (!context) {
+        throw new Error("Unable to create the portrait enhancement surface.");
+    }
+
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.filter = "brightness(1.02) contrast(1.04) saturate(1.05)";
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    context.filter = "none";
+
+    // Very subtle studio-light lift. It improves flat phone portraits
+    // without replacing the user's appearance with an AI-generated face.
+    const glow = context.createRadialGradient(
+        canvas.width * 0.5,
+        canvas.height * 0.34,
+        0,
+        canvas.width * 0.5,
+        canvas.height * 0.34,
+        Math.max(canvas.width, canvas.height) * 0.65,
+    );
+    glow.addColorStop(0, "rgba(255,255,255,0.055)");
+    glow.addColorStop(1, "rgba(255,255,255,0)");
+    context.fillStyle = glow;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    return canvas;
+}
+
+function sampleCanvasColor(
+    context: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+): string {
+
+    try {
+        const pixel = context.getImageData(x, y, 1, 1).data;
+        return `rgba(${pixel[0]}, ${pixel[1]}, ${pixel[2]}, 0.94)`;
+    } catch {
+        return "rgba(190, 155, 130, 0.94)";
+    }
+}
+
+function drawEyeCorrection(
+    context: CanvasRenderingContext2D,
+    landmarks: readonly AvatarLandmark[],
+    indices: readonly number[],
+    blink: number,
+    gazeX: number,
+    gazeY: number,
+): void {
+    const points = indices
+        .map((index) => landmarks[index])
+        .filter((point): point is AvatarLandmark => Boolean(point));
+
+    if (points.length < 6) {
+        return;
+    }
+
+    const minX = Math.min(...points.map((point) => point.x));
+    const maxX = Math.max(...points.map((point) => point.x));
+    const minY = Math.min(...points.map((point) => point.y));
+    const maxY = Math.max(...points.map((point) => point.y));
+
+    // This correction is deliberately conservative. The underlying
+    // 478-point mesh does the majority of the eye motion.
+    if (blink > 0.18) {
+        const alpha = Math.min(0.9, (blink - 0.18) / 0.7);
+        const centerX = (minX + maxX) * 0.5 * context.canvas.width;
+        const centerY = (minY + maxY) * 0.5 * context.canvas.height;
+        const width = (maxX - minX) * context.canvas.width * 0.96;
+        const height = Math.max(
+            (maxY - minY) * context.canvas.height * 1.4,
+            3,
+        );
+
+        context.save();
+        context.globalAlpha = alpha;
+        const sampleY = Math.max(0, Math.round((minY - (maxY - minY) * 0.18) * context.canvas.height));
+        const sampleX = Math.round(((minX + maxX) * 0.5) * context.canvas.width);
+        context.fillStyle = sampleCanvasColor(context, sampleX, sampleY);
+        context.beginPath();
+        context.ellipse(centerX, centerY, width * 0.5, height * 0.5, 0, 0, Math.PI * 2);
+        context.fill();
+        context.restore();
+    } else if (Math.abs(gazeX) > 0.08 || Math.abs(gazeY) > 0.08) {
+        // Small catchlight/gaze cue. The real iris texture remains supplied
+        // by the facial mesh, while this makes gaze changes easier to perceive.
+        const centerX = (minX + maxX) * 0.5 * context.canvas.width;
+        const centerY = (minY + maxY) * 0.5 * context.canvas.height;
+        const radius = Math.max(
+            1.2,
+            Math.min(maxX - minX, maxY - minY) * context.canvas.width * 0.06,
+        );
+        const dx = gazeX * radius * 0.7;
+        const dy = -gazeY * radius * 0.45;
+
+        context.save();
+        context.globalAlpha = 0.28;
+        context.fillStyle = "rgba(255,255,255,0.9)";
+        context.beginPath();
+        context.arc(centerX + dx, centerY + dy, radius * 0.18, 0, Math.PI * 2);
+        context.fill();
+        context.restore();
+    }
+}
+
+function drawMouthCorrection(
+    context: CanvasRenderingContext2D,
+    landmarks: readonly AvatarLandmark[],
+    mouthOpen: number,
+    smile: number,
+    pucker: number,
+): void {
+    const indices = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291];
+    const points = indices
+        .map((index) => landmarks[index])
+        .filter((point): point is AvatarLandmark => Boolean(point));
+
+    if (points.length < 8 || mouthOpen < 0.12) {
+        return;
+    }
+
+    const minX = Math.min(...points.map((point) => point.x));
+    const maxX = Math.max(...points.map((point) => point.x));
+    const minY = Math.min(...points.map((point) => point.y));
+    const maxY = Math.max(...points.map((point) => point.y));
+
+    const cx = (minX + maxX) * 0.5 * context.canvas.width;
+    const cy = (minY + maxY) * 0.5 * context.canvas.height;
+    const width = (maxX - minX) * context.canvas.width;
+    const height = (maxY - minY) * context.canvas.height;
+    const openHeight = height * (0.22 + mouthOpen * 0.72);
+    const widthScale = 0.72 + smile * 0.32 - pucker * 0.24;
+
+    context.save();
+    context.globalAlpha = Math.min(0.88, 0.18 + mouthOpen * 0.75);
+    context.fillStyle = "rgba(38, 13, 17, 0.92)";
+    context.beginPath();
+    context.ellipse(
+        cx,
+        cy + height * 0.05,
+        Math.max(2, width * 0.5 * widthScale),
+        Math.max(1.5, openHeight * 0.5),
+        0,
+        0,
+        Math.PI * 2,
+    );
+    context.fill();
+
+    // A small lower-lip highlight keeps the mouth from looking like a flat hole.
+    context.globalAlpha = 0.18 + mouthOpen * 0.15;
+    context.fillStyle = "rgba(238, 176, 177, 0.75)";
+    context.beginPath();
+    context.ellipse(
+        cx,
+        cy + openHeight * 0.25,
+        Math.max(2, width * 0.28),
+        Math.max(1, openHeight * 0.12),
+        0,
+        0,
+        Math.PI * 2,
+    );
+    context.fill();
+    context.restore();
+}
+
 /**
  * Draw an image using object-fit: cover semantics.
  *
@@ -965,13 +1192,15 @@ function getBounds(
  */
 function drawCover(
     context: CanvasRenderingContext2D,
-    image: HTMLImageElement,
+    image: CanvasImageSource,
+    sourceWidth: number,
+    sourceHeight: number,
     width: number,
     height: number,
 ): void {
     if (
-        image.naturalWidth <= 0 ||
-        image.naturalHeight <= 0 ||
+        sourceWidth <= 0 ||
+        sourceHeight <= 0 ||
         width <= 0 ||
         height <= 0
     ) {
@@ -979,8 +1208,8 @@ function drawCover(
     }
 
     const imageAspect =
-        image.naturalWidth /
-        image.naturalHeight;
+        sourceWidth /
+        sourceHeight;
 
     const canvasAspect =
         width / height;
@@ -1029,7 +1258,7 @@ function drawCover(
 
 function drawImageTriangle(
     context: CanvasRenderingContext2D,
-    image: HTMLImageElement,
+    image: CanvasImageSource,
 
     sourceA: Point,
     sourceB: Point,
