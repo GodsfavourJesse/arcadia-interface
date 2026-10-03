@@ -4,7 +4,7 @@
  * - VRM: Rigged 3D humanoid avatar.
  * - GLTF: General GLTF/GLB 3D avatar.
  * - 2D: Rigged 2D avatar.
- * - IMAGE: Static image fallback.
+ * - IMAGE: User-provided portrait/image avatar.
  */
 export const AVATAR_TYPE = {
     VRM: "vrm",
@@ -18,6 +18,10 @@ export type AvatarType =
 
 /**
  * Rendering strategy used by the avatar engine.
+ *
+ * STATIC represents an image-based source asset.
+ * The source image may still be dynamically animated by
+ * a renderer such as ImagePuppetRenderer.
  */
 export const AVATAR_RENDER_MODE = {
     VRM: "vrm",

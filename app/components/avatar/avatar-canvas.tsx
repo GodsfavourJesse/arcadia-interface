@@ -22,10 +22,8 @@ import {
 import {
     TwoDRenderer,
 } from "@/app/lib/avatar/two-d-renderer";
+import { ImagePuppetRenderer } from "@/app/lib/avatar/image-puppet-renderer";
 
-import {
-    StaticRenderer,
-} from "@/app/lib/avatar/static-renderer";
 
 type AvatarCanvasProps = {
     avatar: AvatarDefinition;
@@ -164,7 +162,7 @@ export function AvatarCanvas({
                             );
 
                         case AVATAR_TYPE.IMAGE:
-                            return new StaticRenderer(
+                            return new ImagePuppetRenderer(
                                 rendererCanvas,
                             );
 
