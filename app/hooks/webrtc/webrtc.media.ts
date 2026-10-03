@@ -24,6 +24,18 @@ export function createMediaConstraints(
         channelCount: {
             ideal: 1,
         },
+
+        /*
+         * Prefer the browser's native wideband voice path.
+         * These are preferences, not hard requirements.
+         */
+        sampleRate: {
+            ideal: 48_000,
+        },
+
+        sampleSize: {
+            ideal: 16,
+        },
     };
 
     if (callType === "video") {
@@ -86,6 +98,14 @@ export async function configureAudioTracks(
                     channelCount: {
                         ideal: 1,
                     },
+
+                    sampleRate: {
+                        ideal: 48_000,
+                    },
+
+                    sampleSize: {
+                        ideal: 16,
+                    },
                 },
             );
         } catch (error) {
@@ -105,6 +125,23 @@ export async function configureAudioTracks(
             } catch {
                 // Optional browser optimization.
             }
+        }
+    }
+}
+
+
+/*
+ * Apply browser-friendly video hints without taking ownership of
+ * the track. This helps real-time encoders prioritize motion.
+ */
+export function configureVideoTracks(
+    stream: MediaStream,
+): void {
+    for (const track of stream.getVideoTracks()) {
+        try {
+            track.contentHint = "motion";
+        } catch {
+            // Optional browser optimization.
         }
     }
 }
