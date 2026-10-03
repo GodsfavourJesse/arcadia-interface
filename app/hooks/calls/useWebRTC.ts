@@ -306,6 +306,25 @@ export function useWebRTC({
 
     const maybeReportConnected =
         useCallback(() => {
+            console.log(
+                "[WebRTC] Checking connected state",
+                {
+                    callId: callIdRef.current,
+                    peerConnected:
+                        peerConnectedRef.current,
+                    remoteMediaReady:
+                        remoteMediaReadyRef.current,
+                    alreadyReported:
+                        connectedReportedRef.current,
+                    peerConnectionState:
+                        peerConnectionRef.current
+                            ?.connectionState ?? null,
+                    iceConnectionState:
+                        peerConnectionRef.current
+                            ?.iceConnectionState ?? null,
+                },
+            );
+
             if (
                 connectedReportedRef.current ||
                 !peerConnectedRef.current ||
@@ -341,8 +360,17 @@ export function useWebRTC({
                     callIdRef.current;
 
                 if (!currentCallId) {
+                    console.warn(
+                        "[WebRTC] Cannot send media state without callId",
+                    );
                     return;
                 }
+
+                console.log("[WebRTC] Sending media state", {
+                    callId: currentCallId,
+                    audioEnabled,
+                    videoEnabled,
+                });
 
                 const available =
                     await realtimeClient.waitUntilOpen(
@@ -366,6 +394,13 @@ export function useWebRTC({
                         videoEnabled,
                     });
 
+                console.log("[WebRTC] Media state send result", {
+                    callId: currentCallId,
+                    sent,
+                    audioEnabled,
+                    videoEnabled,
+                });
+
                 if (!sent) {
                     console.warn(
                         "[WebRTC] Unable to send media state.",
@@ -387,6 +422,35 @@ export function useWebRTC({
      */
     const cleanup =
         useCallback(() => {
+            console.log("[WebRTC] Cleanup requested", {
+                callId: callIdRef.current,
+                callType: callTypeRef.current,
+                isCaller: isCallerRef.current,
+                peerConnectionState:
+                    peerConnectionRef.current
+                        ?.connectionState ?? null,
+                iceConnectionState:
+                    peerConnectionRef.current
+                        ?.iceConnectionState ?? null,
+                localTracks:
+                    localStreamRef.current
+                        ?.getTracks()
+                        .map((track) => ({
+                            kind: track.kind,
+                            id: track.id,
+                            readyState: track.readyState,
+                            enabled: track.enabled,
+                        })) ?? [],
+                remoteTracks:
+                    remoteStreamRef.current
+                        ?.getTracks()
+                        .map((track) => ({
+                            kind: track.kind,
+                            id: track.id,
+                            readyState: track.readyState,
+                        })) ?? [],
+            });
+
             const peer =
                 peerConnectionRef.current;
 
@@ -643,17 +707,74 @@ export function useWebRTC({
                     );
                 }
 
+                const previousTrack =
+                    sender.track;
+
+                console.log(
+                    "[WebRTC] Replacing video sender track",
+                    {
+                        callId: callIdRef.current,
+                        connectionState:
+                            peer.connectionState,
+                        senderTrackBefore: {
+                            id:
+                                previousTrack?.id ??
+                                null,
+                            readyState:
+                                previousTrack
+                                    ?.readyState ??
+                                null,
+                            kind:
+                                previousTrack?.kind ??
+                                null,
+                            enabled:
+                                previousTrack?.enabled ??
+                                null,
+                        },
+                        nextTrack: {
+                            id:
+                                nextTrack?.id ??
+                                null,
+                            readyState:
+                                nextTrack
+                                    ?.readyState ??
+                                null,
+                            kind:
+                                nextTrack?.kind ??
+                                null,
+                            enabled:
+                                nextTrack?.enabled ??
+                                null,
+                        },
+                    },
+                );
+
                 await replacePeerVideoTrack(
                     sender,
                     nextTrack,
                 );
 
-                console.log("[WebRTC] Replacing video sender track", {
-                    previousTrackId: sender.track?.id ?? null,
-                    previousReadyState: sender.track?.readyState ?? null,
-                    nextTrackId: nextTrack?.id ?? null,
-                    nextReadyState: nextTrack?.readyState ?? null,
-                });
+                console.log(
+                    "[WebRTC] Video sender track replaced",
+                    {
+                        senderTrackAfter: {
+                            id:
+                                sender.track?.id ??
+                                null,
+                            readyState:
+                                sender.track
+                                    ?.readyState ??
+                                null,
+                            kind:
+                                sender.track?.kind ??
+                                null,
+                            enabled:
+                                sender.track
+                                    ?.enabled ??
+                                null,
+                        },
+                    },
+                );
             },
             [],
         );
@@ -899,6 +1020,31 @@ export function useWebRTC({
                 return existing;
             }
 
+            console.log(
+                "[WebRTC] Creating RTCPeerConnection",
+                {
+                    callId: callIdRef.current,
+                    callType: callTypeRef.current,
+                    isCaller: isCallerRef.current,
+                    initialVideoSource:
+                        initialVideoSourceRef.current,
+                    iceServers:
+                        iceServersRef.current.map(
+                            (server) => ({
+                                urls: server.urls,
+                                hasUsername:
+                                    Boolean(
+                                        server.username,
+                                    ),
+                                hasCredential:
+                                    Boolean(
+                                        server.credential,
+                                    ),
+                            }),
+                        ),
+                },
+            );
+
             const peer =
                 createPeerConnectionInstance(
                     iceServersRef.current,
@@ -906,6 +1052,18 @@ export function useWebRTC({
 
             peerConnectionRef.current =
                 peer;
+
+            console.log(
+                "[WebRTC] RTCPeerConnection created",
+                {
+                    connectionState:
+                        peer.connectionState,
+                    signalingState:
+                        peer.signalingState,
+                    iceConnectionState:
+                        peer.iceConnectionState,
+                },
+            );
 
             const incomingStream =
                 new MediaStream();
@@ -972,6 +1130,31 @@ export function useWebRTC({
                             ? "video"
                             : "audio";
 
+                    console.log(
+                        "[WebRTC] Remote stream updated",
+                        {
+                            callId: callIdRef.current,
+                            requiredKind,
+                            streamId:
+                                nextStream.id,
+                            tracks:
+                                nextStream
+                                    .getTracks()
+                                    .map(
+                                        (track) => ({
+                                            kind:
+                                                track.kind,
+                                            id:
+                                                track.id,
+                                            readyState:
+                                                track.readyState,
+                                            enabled:
+                                                track.enabled,
+                                        }),
+                                    ),
+                        },
+                    );
+
                     remoteMediaReadyRef.current =
                         incomingStream
                             .getTracks()
@@ -988,6 +1171,18 @@ export function useWebRTC({
 
             peer.onicecandidate =
                 (event) => {
+                    console.log(
+                        "[WebRTC] Local ICE candidate event",
+                        {
+                            callId: callIdRef.current,
+                            hasCandidate:
+                                Boolean(event.candidate),
+                            candidate:
+                                event.candidate?.candidate ??
+                                null,
+                        },
+                    );
+
                     if (
                         !event.candidate ||
                         !callIdRef.current
@@ -1001,6 +1196,16 @@ export function useWebRTC({
                         ),
                     );
 
+                    console.log(
+                        "[WebRTC] Local ICE queued",
+                        {
+                            callId: callIdRef.current,
+                            pendingCount:
+                                pendingLocalIceCandidatesRef
+                                    .current.length,
+                        },
+                    );
+
                     void flushLocalIceCandidates();
                 };
 
@@ -1008,6 +1213,19 @@ export function useWebRTC({
                 () => {
                     const state =
                         peer.connectionState;
+
+                    console.log(
+                        "[WebRTC] Peer connection state changed",
+                        {
+                            callId: callIdRef.current,
+                            connectionState:
+                                state,
+                            signalingState:
+                                peer.signalingState,
+                            iceConnectionState:
+                                peer.iceConnectionState,
+                        },
+                    );
 
                     switch (state) {
                         case "new":
@@ -1061,6 +1279,19 @@ export function useWebRTC({
 
             peer.oniceconnectionstatechange =
                 () => {
+                    console.log(
+                        "[WebRTC] ICE connection state changed",
+                        {
+                            callId: callIdRef.current,
+                            iceConnectionState:
+                                peer.iceConnectionState,
+                            connectionState:
+                                peer.connectionState,
+                            signalingState:
+                                peer.signalingState,
+                        },
+                    );
+
                     if (
                         peer.iceConnectionState ===
                             "connected" ||
@@ -1121,12 +1352,48 @@ export function useWebRTC({
                 );
 
                 try {
+                    const constraints =
+                        createMediaConstraints(type);
+
+                    console.log(
+                        "[WebRTC] Requesting local media",
+                        {
+                            callId: callIdRef.current,
+                            callType: type,
+                            constraints,
+                        },
+                    );
+
                     const stream =
                         await navigator.mediaDevices.getUserMedia(
-                            createMediaConstraints(
-                                type,
-                            ),
+                            constraints,
                         );
+
+                    console.log(
+                        "[WebRTC] Local media acquired",
+                        {
+                            streamId: stream.id,
+                            tracks:
+                                stream
+                                    .getTracks()
+                                    .map(
+                                        (track) => ({
+                                            kind:
+                                                track.kind,
+                                            id:
+                                                track.id,
+                                            readyState:
+                                                track.readyState,
+                                            enabled:
+                                                track.enabled,
+                                            label:
+                                                track.label,
+                                            settings:
+                                                track.getSettings(),
+                                        }),
+                                    ),
+                        },
+                    );
 
                     await configureAudioTracks(
                         stream,
@@ -1156,6 +1423,27 @@ export function useWebRTC({
 
                     localStreamRef.current =
                         stream;
+
+                    console.log(
+                        "[WebRTC] Local media stored",
+                        {
+                            streamId: stream.id,
+                            audioTrackIds:
+                                stream
+                                    .getAudioTracks()
+                                    .map(
+                                        (track) =>
+                                            track.id,
+                                    ),
+                            videoTrackIds:
+                                stream
+                                    .getVideoTracks()
+                                    .map(
+                                        (track) =>
+                                            track.id,
+                                    ),
+                        },
+                    );
 
                     setLocalStream(
                         stream,
@@ -1232,6 +1520,38 @@ export function useWebRTC({
                 peer: RTCPeerConnection,
                 stream: MediaStream,
             ) => {
+                console.log(
+                    "[WebRTC] addLocalTracks called",
+                    {
+                        callId: callIdRef.current,
+                        callType: callTypeRef.current,
+                        peerConnectionState:
+                            peer.connectionState,
+                        streamId: stream.id,
+                        tracks:
+                            stream
+                                .getTracks()
+                                .map(
+                                    (track) => ({
+                                        kind:
+                                            track.kind,
+                                        id:
+                                            track.id,
+                                        readyState:
+                                            track.readyState,
+                                        enabled:
+                                            track.enabled,
+                                    }),
+                                ),
+                        existingVideoSender:
+                            videoSenderRef.current
+                                ?.track?.id ?? null,
+                        existingAudioSender:
+                            audioSenderRef.current
+                                ?.track?.id ?? null,
+                    },
+                );
+
                 /*
                  * Normal first-time setup.
                  */
@@ -1250,6 +1570,44 @@ export function useWebRTC({
 
                     audioSenderRef.current =
                         result.audioSender;
+
+                    console.log(
+                        "[WebRTC] Local tracks added",
+                        {
+                            videoSenderTrack:
+                                result.videoSender
+                                    ?.track
+                                    ? {
+                                          id:
+                                              result
+                                                  .videoSender
+                                                  .track
+                                                  .id,
+                                          readyState:
+                                              result
+                                                  .videoSender
+                                                  .track
+                                                  .readyState,
+                                      }
+                                    : null,
+                            audioSenderTrack:
+                                result.audioSender
+                                    ?.track
+                                    ? {
+                                          id:
+                                              result
+                                                  .audioSender
+                                                  .track
+                                                  .id,
+                                          readyState:
+                                              result
+                                                  .audioSender
+                                                  .track
+                                                  .readyState,
+                                      }
+                                    : null,
+                        },
+                    );
 
                     setIsVideoSenderReady(
                         result.videoSender !== null,
@@ -1334,11 +1692,61 @@ export function useWebRTC({
                 if (
                     negotiationStartedRef.current
                 ) {
+                    console.log(
+                        "[WebRTC] createOffer skipped: negotiation already started",
+                        {
+                            callId:
+                                callIdRef.current,
+                        },
+                    );
                     return;
                 }
 
                 negotiationStartedRef.current =
                     true;
+
+                console.log(
+                    "[WebRTC] Starting offer creation",
+                    {
+                        callId:
+                            callIdRef.current,
+                        callType:
+                            callTypeRef.current,
+                        initialVideoSource:
+                            initialVideoSourceRef.current,
+                        connectionState:
+                            peer.connectionState,
+                        iceConnectionState:
+                            peer.iceConnectionState,
+                        senders:
+                            peer
+                                .getSenders()
+                                .map(
+                                    (sender) => ({
+                                        kind:
+                                            sender
+                                                .track
+                                                ?.kind ??
+                                            null,
+                                        trackId:
+                                            sender
+                                                .track
+                                                ?.id ??
+                                            null,
+                                        readyState:
+                                            sender
+                                                .track
+                                                ?.readyState ??
+                                            null,
+                                        enabled:
+                                            sender
+                                                .track
+                                                ?.enabled ??
+                                            null,
+                                    }),
+                                ),
+                    },
+                );
 
                 try {
                     const videoSender =
@@ -1356,6 +1764,43 @@ export function useWebRTC({
 
                     await peer.setLocalDescription(
                         offer,
+                    );
+
+                    console.log(
+                        "[WebRTC] Local OFFER description created",
+                        {
+                            type:
+                                peer
+                                    .localDescription
+                                    ?.type ?? null,
+                            sdpLength:
+                                peer
+                                    .localDescription
+                                    ?.sdp
+                                    ?.length ?? 0,
+                            senders:
+                                peer
+                                    .getSenders()
+                                    .map(
+                                        (sender) => ({
+                                            kind:
+                                                sender
+                                                    .track
+                                                    ?.kind ??
+                                                null,
+                                            trackId:
+                                                sender
+                                                    .track
+                                                    ?.id ??
+                                                null,
+                                            readyState:
+                                                sender
+                                                    .track
+                                                    ?.readyState ??
+                                                null,
+                                        }),
+                                    ),
+                        },
                     );
 
                     const description =
@@ -1378,12 +1823,56 @@ export function useWebRTC({
                         );
                     }
 
+                    console.log(
+                        "[WebRTC] Sending OFFER",
+                        {
+                            callId:
+                                currentCallId,
+                            sdpLength:
+                                description.sdp
+                                    .length,
+                            videoSenderTrack:
+                                peer
+                                    .getSenders()
+                                    .find(
+                                        (sender) =>
+                                            sender
+                                                .track
+                                                ?.kind ===
+                                            "video",
+                                    )
+                                    ?.track
+                                    ?.id ?? null,
+                            videoSenderReadyState:
+                                peer
+                                    .getSenders()
+                                    .find(
+                                        (sender) =>
+                                            sender
+                                                .track
+                                                ?.kind ===
+                                            "video",
+                                    )
+                                    ?.track
+                                    ?.readyState ??
+                                null,
+                        },
+                    );
+
                     await sendSignalingEvent({
                         type: "OFFER",
                         callId:
                             currentCallId,
                         sdp: description.sdp,
                     });
+
+                    console.log(
+                        "[WebRTC] OFFER sent",
+                        {
+                            callId:
+                                currentCallId,
+                        },
+                    );
 
                     await flushLocalIceCandidates();
 
@@ -1448,8 +1937,40 @@ export function useWebRTC({
                 }
 
                 if (negotiationStartedRef.current) {
+                    console.log(
+                        "[WebRTC] startInitialOffer skipped: negotiation already started",
+                        {
+                            callId:
+                                callIdRef.current,
+                        },
+                    );
                     return;
                 }
+
+                console.log(
+                    "[WebRTC] startInitialOffer called",
+                    {
+                        callId:
+                            callIdRef.current,
+                        callType:
+                            callTypeRef.current,
+                        initialVideoSource:
+                            initialVideoSourceRef.current,
+                        videoSenderTrack:
+                            videoSenderRef.current
+                                ?.track?.id ?? null,
+                        videoSenderReadyState:
+                            videoSenderRef.current
+                                ?.track?.readyState ?? null,
+                        videoSenderEnabled:
+                            videoSenderRef.current
+                                ?.track?.enabled ?? null,
+                        peerConnectionState:
+                            peer.connectionState,
+                        signalingState:
+                            peer.signalingState,
+                    },
+                );
 
                 await sendMediaState(
                     !isMutedRef.current,
@@ -1472,16 +1993,34 @@ export function useWebRTC({
                     { type: "OFFER" }
                 >,
             ) => {
+                console.log("[WebRTC] OFFER received", {
+                    eventCallId: event.callId,
+                    activeCallId: callIdRef.current,
+                    sdpLength: event.sdp.length,
+                    isCaller: isCallerRef.current,
+                    enabled: enabledRef.current,
+                });
+
                 if (
                     event.callId !==
                     callIdRef.current
                 ) {
+                    console.warn(
+                        "[WebRTC] Ignoring OFFER for another call",
+                        {
+                            eventCallId: event.callId,
+                            activeCallId: callIdRef.current,
+                        },
+                    );
                     return;
                 }
 
                 if (
                     isCallerRef.current
                 ) {
+                    console.log(
+                        "[WebRTC] Ignoring OFFER because this peer is the caller",
+                    );
                     return;
                 }
 
@@ -1507,10 +2046,43 @@ export function useWebRTC({
                     stream,
                 );
 
+                console.log(
+                    "[WebRTC] Applying remote OFFER",
+                    {
+                        callId: event.callId,
+                        localSenders:
+                            peer.getSenders().map(
+                                (sender) => ({
+                                    kind:
+                                        sender.track?.kind ??
+                                        null,
+                                    trackId:
+                                        sender.track?.id ??
+                                        null,
+                                    readyState:
+                                        sender.track?.readyState ??
+                                        null,
+                                }),
+                            ),
+                    },
+                );
+
                 await peer.setRemoteDescription(
                     {
                         type: "offer",
                         sdp: event.sdp,
+                    },
+                );
+
+                console.log(
+                    "[WebRTC] Remote OFFER applied",
+                    {
+                        callId: event.callId,
+                        signalingState:
+                            peer.signalingState,
+                        remoteDescriptionType:
+                            peer.remoteDescription?.type ??
+                            null,
                     },
                 );
 
@@ -1525,6 +2097,32 @@ export function useWebRTC({
                     answer,
                 );
 
+                console.log(
+                    "[WebRTC] Local ANSWER created",
+                    {
+                        callId: event.callId,
+                        signalingState:
+                            peer.signalingState,
+                        sdpLength:
+                            peer.localDescription?.sdp
+                                ?.length ?? 0,
+                        localSenders:
+                            peer.getSenders().map(
+                                (sender) => ({
+                                    kind:
+                                        sender.track?.kind ??
+                                        null,
+                                    trackId:
+                                        sender.track?.id ??
+                                        null,
+                                    readyState:
+                                        sender.track?.readyState ??
+                                        null,
+                                }),
+                            ),
+                    },
+                );
+
                 const description =
                     peer.localDescription;
 
@@ -1534,12 +2132,27 @@ export function useWebRTC({
                     );
                 }
 
+                console.log(
+                    "[WebRTC] Sending ANSWER",
+                    {
+                        callId: event.callId,
+                        sdpLength: description.sdp.length,
+                    },
+                );
+
                 await sendSignalingEvent({
                     type: "ANSWER",
                     callId:
                         event.callId,
                     sdp: description.sdp,
                 });
+
+                console.log(
+                    "[WebRTC] ANSWER sent",
+                    {
+                        callId: event.callId,
+                    },
+                );
 
                 await flushLocalIceCandidates();
 
@@ -1566,11 +2179,29 @@ export function useWebRTC({
                     { type: "ANSWER" }
                 >,
             ) => {
+                console.log("[WebRTC] ANSWER received", {
+                    eventCallId: event.callId,
+                    activeCallId: callIdRef.current,
+                    sdpLength: event.sdp.length,
+                    isCaller: isCallerRef.current,
+                });
+
                 if (
                     event.callId !==
                         callIdRef.current ||
                     !isCallerRef.current
                 ) {
+                    console.warn(
+                        "[WebRTC] Ignoring ANSWER",
+                        {
+                            eventCallId:
+                                event.callId,
+                            activeCallId:
+                                callIdRef.current,
+                            isCaller:
+                                isCallerRef.current,
+                        },
+                    );
                     return;
                 }
 
@@ -1585,6 +2216,17 @@ export function useWebRTC({
                     {
                         type: "answer",
                         sdp: event.sdp,
+                    },
+                );
+
+                console.log(
+                    "[WebRTC] Remote ANSWER applied",
+                    {
+                        callId: event.callId,
+                        signalingState:
+                            peer.signalingState,
+                        connectionState:
+                            peer.connectionState,
                     },
                 );
 
@@ -1862,6 +2504,16 @@ export function useWebRTC({
             return;
         }
 
+        console.log(
+            "[WebRTC] Receiver media preparation effect started",
+            {
+                callId,
+                callType,
+                enabled,
+                isCaller,
+            },
+        );
+
         let cancelled = false;
 
         async function prepareReceiverMedia() {
@@ -1938,6 +2590,17 @@ export function useWebRTC({
             return;
         }
 
+        console.log(
+            "[WebRTC] Caller preparation effect started",
+            {
+                callId,
+                callType,
+                initialVideoSource,
+                enabled,
+                isCaller,
+            },
+        );
+
         if (negotiationStartedRef.current) {
             return;
         }
@@ -1973,6 +2636,21 @@ export function useWebRTC({
 
                 if (callType === "video" &&
                     initialVideoSourceRef.current === "avatar") {
+                    console.log(
+                        "[WebRTC] Caller prepared camera sender; waiting for avatar media layer before OFFER",
+                        {
+                            callId: callIdRef.current,
+                            cameraTrackId:
+                                videoSenderRef.current
+                                    ?.track?.id ?? null,
+                            cameraTrackReadyState:
+                                videoSenderRef.current
+                                    ?.track?.readyState ?? null,
+                            initialVideoSource:
+                                initialVideoSourceRef.current,
+                        },
+                    );
+
                     setConnectionState(
                         "connecting",
                     );
