@@ -98,6 +98,12 @@ export type AvatarEyeState = {
  *
  * Values are normalized to 0..1.
  */
+export type AvatarLandmark = {
+    x: number;
+    y: number;
+    z: number;
+};
+
 export type AvatarMouthState = {
     open: number;
     smile: number;
@@ -113,6 +119,8 @@ export type AvatarMouthState = {
  */
 export type AvatarTrackingState = {
     faceDetected: boolean;
+    /** Local MediaPipe face mesh. Never persisted or sent to the backend. */
+    landmarks: readonly AvatarLandmark[];
     face: AvatarFaceState;
     nose: AvatarNoseState;
     head: AvatarHeadRotation;

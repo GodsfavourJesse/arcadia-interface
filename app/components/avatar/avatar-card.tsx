@@ -39,18 +39,31 @@ export function AvatarCard({
                     : "cursor-pointer",
             ].join(" ")}
         >
-            <Image
-                src={avatar.thumbnailUrl}
-                alt=""
-                fill
-                sizes="(max-width: 640px) 30vw, 160px"
-                className={[
-                    "object-cover transition-transform duration-300",
-                    !isDisabled
-                        ? "group-hover:scale-105"
-                        : "",
-                ].join(" ")}
-            />
+            {avatar.thumbnailUrl.startsWith("blob:") ? (
+                <img
+                    src={avatar.thumbnailUrl}
+                    alt=""
+                    className={[
+                        "absolute inset-0 h-full w-full object-cover transition-transform duration-300",
+                        !isDisabled
+                            ? "group-hover:scale-105"
+                            : "",
+                    ].join(" ")}
+                />
+            ) : (
+                <Image
+                    src={avatar.thumbnailUrl}
+                    alt=""
+                    fill
+                    sizes="(max-width: 640px) 30vw, 160px"
+                    className={[
+                        "object-cover transition-transform duration-300",
+                        !isDisabled
+                            ? "group-hover:scale-105"
+                            : "",
+                    ].join(" ")}
+                />
+            )}
 
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent" />
 

@@ -813,6 +813,9 @@ function smoothTracking(
         faceDetected:
             tracking.faceDetected,
 
+        landmarks:
+            tracking.landmarks,
+
         face: {
             x: filters.faceX.value,
             y: filters.faceY.value,

@@ -10,9 +10,8 @@ import {
 
 import { getConversation } from "@/app/services/conversation/conversations.service";
 import { useActiveCall } from "@/app/hooks/calls/useActiveCall";
-import { useWebRTC } from "@/app/hooks/calls/useWebRTC";
+import { useCallMediaSession } from "@/app/hooks/calls/useCallMediaSession";
 import { useCallRingtone } from "@/app/hooks/calls/useCallRingtone";
-import { useAvatarMedia } from "@/app/hooks/avatar/useAvatarMedia";
 import { useAvatarSelection } from "@/app/hooks/avatar/useAvatarSelection";
 import { useCallStore } from "@/app/store/calls/call.store";
 import { CALL_STATE, CALL_TYPE } from "@/app/types/calls/calls.types";
@@ -160,16 +159,36 @@ function RemoteAudio({
         audio.muted = !enabled;
         audio.volume = enabled ? 1 : 0;
 
-        if (stream && enabled) {
-            void audio.play().catch((error) => {
+        let cancelled = false;
+
+        const tryPlay = () => {
+            if (cancelled || !audio.srcObject || !enabled) {
+                return;
+            }
+
+            void audio.play().catch((error: unknown) => {
+                if (error instanceof DOMException && error.name === "AbortError") {
+                    return;
+                }
+
                 console.warn(
-                    "[WebRTC] Remote audio playback requires user interaction:",
+                    "[WebRTC] Remote audio playback was blocked by the browser:",
                     error,
                 );
             });
+        };
+
+        if (stream && enabled) {
+            tryPlay();
+
+            window.addEventListener("pointerdown", tryPlay, { once: true });
+            window.addEventListener("keydown", tryPlay, { once: true });
         }
 
         return () => {
+            cancelled = true;
+            window.removeEventListener("pointerdown", tryPlay);
+            window.removeEventListener("keydown", tryPlay);
             audio.pause();
             audio.srcObject = null;
         };
@@ -404,6 +423,7 @@ function AvatarPicker({
     isAvatarActive,
     disabled,
     onSelect,
+    onUploadImage,
     onUseAvatar,
     onUseCamera,
     onClose,
@@ -413,6 +433,7 @@ function AvatarPicker({
     isAvatarActive: boolean;
     disabled: boolean;
     onSelect: (avatar: AvatarDefinition) => void;
+    onUploadImage: (file: File) => void;
     onUseAvatar: () => void;
     onUseCamera: () => void;
     onClose: () => void;
@@ -443,6 +464,24 @@ function AvatarPicker({
                     <CloseIcon />
                 </button>
             </div>
+
+            <label className="mb-3 flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-white/15 bg-white/[0.03] px-4 py-3 text-xs font-semibold text-white/75 transition hover:border-white/30 hover:bg-white/[0.06]">
+                <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="sr-only"
+                    disabled={disabled}
+                    onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        event.target.value = "";
+                        if (file) {
+                            onUploadImage(file);
+                        }
+                    }}
+                />
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10">+</span>
+                Upload a face image
+            </label>
 
             <div className="grid max-h-[min(52vh,420px)] grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3">
                 {avatars.map((avatar) => (
@@ -574,6 +613,7 @@ export function CallOverlay() {
      */
     const localVideoSource = useCallStore((state) => state.localVideoSource);
     const localAvatarId = useCallStore((state) => state.localAvatarId);
+    const localAvatar = useCallStore((state) => state.localAvatar);
 
     const [loadedProfile, setLoadedProfile] = useState<LoadedProfile | null>(
         null,
@@ -619,13 +659,21 @@ export function CallOverlay() {
         remoteVideoEnabled,
         toggleMute,
         toggleCamera,
-        replaceVideoTrack,
-        isVideoSenderReady,
-    } = useWebRTC({
+        avatarVideoTrack,
+        isAvatarActive,
+        avatarError,
+        handleAvatarCanvasReady,
+        toggleAvatar,
+        disableAvatar,
+    } = useCallMediaSession({
         callId: activeCall?.id ?? null,
         callType: activeCall?.type ?? null,
         isCaller: myParticipant?.role === "caller",
         enabled,
+        isAccepted,
+        isConnected,
+        isCameraEnabled: isVideoCall,
+        initialVideoSource: localVideoSource,
         onConnected: handleConnected,
         onFailed: handleFailed,
     });
@@ -640,20 +688,7 @@ export function CallOverlay() {
      */
     const { avatars, selectedAvatar, selectAvatar } = useAvatarSelection({
         initialAvatarId: localAvatarId ?? "default-vrm",
-    });
-
-    const {
-        avatarVideoTrack,
-        isAvatarActive,
-        error: avatarError,
-        handleAvatarCanvasReady,
-        toggleAvatar,
-        disableAvatar,
-    } = useAvatarMedia({
-        cameraStream: localStream,
-        enabled: isVideoCall && isAccepted && isConnected && isCameraEnabled,
-        videoSenderReady: isVideoSenderReady,
-        replaceVideoTrack,
+        extraAvatars: localAvatar ? [localAvatar] : [],
     });
 
     /*
@@ -981,8 +1016,11 @@ export function CallOverlay() {
                             <AvatarPreview
                                 cameraStream={localStream}
                                 avatar={selectedAvatar}
-                                trackingEnabled={isAvatarActive}
-                                active={isAvatarActive}
+                                trackingEnabled={
+                                    localVideoSource === "avatar" ||
+                                    isAvatarActive
+                                }
+                                active={isAvatarActive || localVideoSource === "avatar"}
                                 onAvatarCanvasReady={handleAvatarCanvasReady}
                             />
                         ) : isCameraEnabled ? (
@@ -1086,6 +1124,45 @@ export function CallOverlay() {
                                     isAvatarActive={isAvatarActive}
                                     disabled={!isConnected || !isCameraEnabled}
                                     onSelect={handleSelectAvatar}
+                                    onUploadImage={(file) => {
+                                        if (!file.type.startsWith("image/")) {
+                                            return;
+                                        }
+
+                                        if (file.size > 10 * 1024 * 1024) {
+                                            return;
+                                        }
+
+                                        const previousAvatar = useCallStore.getState().localAvatar;
+
+                                        if (previousAvatar?.assetUrl.startsWith("blob:")) {
+                                            URL.revokeObjectURL(previousAvatar.assetUrl);
+                                        }
+
+                                        const assetUrl = URL.createObjectURL(file);
+                                        const avatar: AvatarDefinition = {
+                                            id: `uploaded-${crypto.randomUUID()}`,
+                                            name: file.name.replace(/\.[^/.]+$/, "") || "My photo avatar",
+                                            type: "image",
+                                            renderMode: "static",
+                                            thumbnailUrl: assetUrl,
+                                            assetUrl,
+                                            enabled: true,
+                                            capabilities: {
+                                                headTracking: true,
+                                                eyeTracking: true,
+                                                mouthTracking: true,
+                                                facialExpressions: true,
+                                            },
+                                        };
+
+                                        selectAvatar(avatar);
+                                        useCallStore.setState({
+                                            localAvatarId: avatar.id,
+                                            localAvatar: avatar,
+                                            localVideoSource: "avatar",
+                                        });
+                                    }}
                                     onUseAvatar={handleUseAvatar}
                                     onUseCamera={handleUseCamera}
                                     onClose={() => setIsAvatarPickerOpen(false)}

@@ -234,6 +234,7 @@ function createFilters(): TrackingFilters {
 function createNeutralTracking(): AvatarTrackingState {
     return {
         faceDetected: false,
+        landmarks: [],
 
         face: {
             x: 0,
@@ -1467,6 +1468,13 @@ export function useFaceTracking({
                             deltaSeconds,
                         );
 
+                        trackingRef.current.landmarks =
+                            result.faceLandmarks?.[0]?.map((landmark) => ({
+                                x: landmark.x,
+                                y: landmark.y,
+                                z: landmark.z,
+                            })) ?? [];
+
                         trackingRef.current.timestamp =
                             Date.now();
 
@@ -1521,6 +1529,9 @@ export function useFaceTracking({
                                 trackingRef
                                     .current
                                     .faceDetected,
+
+                            landmarks:
+                                trackingRef.current.landmarks,
 
                             face: {
                                 ...trackingRef

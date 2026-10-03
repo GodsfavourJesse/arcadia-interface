@@ -17,15 +17,28 @@ import {
 
 type UseAvatarSelectionOptions = {
     initialAvatarId?: string | null;
+    extraAvatars?: readonly AvatarDefinition[];
 };
 
 export function useAvatarSelection({
     initialAvatarId = null,
+    extraAvatars = [],
 }: UseAvatarSelectionOptions = {}) {
-    const avatars = useMemo(
-        () => getAvailableAvatars(),
-        [],
-    );
+    const avatars = useMemo(() => {
+        const byId = new Map<string, AvatarDefinition>();
+
+        for (const avatar of getAvailableAvatars()) {
+            byId.set(avatar.id, avatar);
+        }
+
+        for (const avatar of extraAvatars) {
+            if (avatar.enabled) {
+                byId.set(avatar.id, avatar);
+            }
+        }
+
+        return Array.from(byId.values());
+    }, [extraAvatars]);
 
     const initialAvatar = useMemo(() => {
         if (initialAvatarId) {
@@ -55,13 +68,7 @@ export function useAvatarSelection({
                 avatars.find(
                     (item) =>
                         item.id === avatar.id,
-                );
-
-            if (!availableAvatar) {
-                throw new Error(
-                    "The selected avatar is not available.",
-                );
-            }
+                ) ?? avatar;
 
             if (!availableAvatar.enabled) {
                 throw new Error(

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useCallback, useState } from "react";
+import { Fragment, useCallback, useRef, useState } from "react";
 
 import { createDirectConversation } from "@/app/services/conversation/conversations.service";
 import { searchUsers } from "@/app/services/users/users.service";
@@ -151,9 +151,16 @@ export default function MakeCallPage() {
 
     const { activeCall } = useActiveCall();
 
+    const [uploadedAvatar, setUploadedAvatar] =
+        useState<AvatarDefinition | null>(null);
+
+    const uploadInputRef =
+        useRef<HTMLInputElement | null>(null);
+
     const { avatars, selectedAvatar, selectAvatar, isSelected } =
         useAvatarSelection({
             initialAvatarId: "default-vrm",
+            extraAvatars: uploadedAvatar ? [uploadedAvatar] : [],
         });
 
     const [step, setStep] = useState<Step>("recipient");
@@ -284,6 +291,7 @@ export default function MakeCallPage() {
                 initialVideoSource:
                     type === CALL_TYPE.VIDEO ? "avatar" : "camera",
                 avatarId: videoAvatar?.id ?? null,
+                avatar: videoAvatar,
             });
         } catch (requestError) {
             setError(
@@ -311,6 +319,49 @@ export default function MakeCallPage() {
 
         void createAndStartCall(type, null);
     }
+
+    const handleAvatarImageUpload = useCallback(
+        (file: File) => {
+            if (!file.type.startsWith("image/")) {
+                setError("Please choose a PNG, JPEG, or WebP image.");
+                return;
+            }
+
+            if (file.size > 10 * 1024 * 1024) {
+                setError("Avatar images must be 10 MB or smaller.");
+                return;
+            }
+
+            const assetUrl = URL.createObjectURL(file);
+
+            const avatar: AvatarDefinition = {
+                id: `uploaded-${crypto.randomUUID()}`,
+                name: file.name.replace(/\.[^/.]+$/, "") || "My photo avatar",
+                type: "image",
+                renderMode: "static",
+                thumbnailUrl: assetUrl,
+                assetUrl,
+                enabled: true,
+                capabilities: {
+                    headTracking: true,
+                    eyeTracking: true,
+                    mouthTracking: true,
+                    facialExpressions: true,
+                },
+            };
+
+            setUploadedAvatar((previous) => {
+                if (previous?.assetUrl.startsWith("blob:")) {
+                    URL.revokeObjectURL(previous.assetUrl);
+                }
+                return avatar;
+            });
+
+            selectAvatar(avatar);
+            setError(null);
+        },
+        [selectAvatar],
+    );
 
     function handleConfirmAvatar() {
         if (!selectedAvatar) {
@@ -563,6 +614,42 @@ export default function MakeCallPage() {
                                     onSelect={() => selectAvatar(avatar)}
                                 />
                             ))}
+                        </div>
+
+                        <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5">
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                    <p className="text-sm font-semibold text-slate-950">
+                                        Use your own image
+                                    </p>
+                                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                                        Upload a clear, front-facing portrait. Miyor will track the face locally during the call.
+                                    </p>
+                                </div>
+
+                                <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => uploadInputRef.current?.click()}
+                                    className="shrink-0 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    Upload image
+                                </button>
+                            </div>
+
+                            <input
+                                ref={uploadInputRef}
+                                type="file"
+                                accept="image/png,image/jpeg,image/webp"
+                                className="hidden"
+                                onChange={(event) => {
+                                    const file = event.target.files?.[0];
+                                    event.target.value = "";
+                                    if (file) {
+                                        handleAvatarImageUpload(file);
+                                    }
+                                }}
+                            />
                         </div>
 
                         {selectedAvatar && (

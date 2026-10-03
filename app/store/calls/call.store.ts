@@ -30,6 +30,8 @@ import type {
     RealtimeServerEvent,
 } from "@/app/types/realtime/realtime.types";
 
+import type { AvatarDefinition } from "@/app/types/avatar/avatar.types";
+
 import {
     isRealtimeCallEvent,
 } from "@/app/types/realtime/realtime.types";
@@ -45,6 +47,7 @@ type CallStoreState = {
     error: string | null;
     localVideoSource: CallVideoSource;
     localAvatarId: string | null;
+    localAvatar: AvatarDefinition | null;
 
     startCall: (input: {
         conversationId: string;
@@ -52,6 +55,7 @@ type CallStoreState = {
         type: CallType;
         initialVideoSource?: CallVideoSource;
         avatarId?: string | null;
+        avatar?: AvatarDefinition | null;
     }) => Promise<void>;
 
     hydrateActiveCall: () => Promise<void>;
@@ -130,6 +134,7 @@ export const useCallStore =
             error: null,
             localVideoSource: "camera",
             localAvatarId: null,
+            localAvatar: null,
 
             startCall: async (input) => {
                 const current =
@@ -154,7 +159,9 @@ export const useCallStore =
                     localVideoSource:
                         input.initialVideoSource ?? "camera",
                     localAvatarId:
-                        input.avatarId ?? null,
+                        input.avatarId ?? input.avatar?.id ?? null,
+                    localAvatar:
+                        input.avatar ?? null,
                 });
 
                 try {
@@ -510,6 +517,7 @@ export const useCallStore =
                               localVideoSource:
                                   "camera",
                               localAvatarId: null,
+                              localAvatar: null,
                           }),
                 });
             },
@@ -520,6 +528,12 @@ export const useCallStore =
                 }),
 
             reset: () => {
+                const currentAvatar = get().localAvatar;
+
+                if (currentAvatar?.assetUrl.startsWith("blob:")) {
+                    URL.revokeObjectURL(currentAvatar.assetUrl);
+                }
+
                 set({
                     activeCall: null,
                     participants: [],
@@ -529,6 +543,7 @@ export const useCallStore =
                     error: null,
                     localVideoSource: "camera",
                     localAvatarId: null,
+                    localAvatar: null,
                 });
             },
         }),
