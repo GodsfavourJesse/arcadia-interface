@@ -56,6 +56,7 @@ type UseWebRTCOptions = {
     callType: CallType | null;
     isCaller: boolean;
     enabled: boolean;
+
     onConnected?: () => void;
     onFailed?: (error: Error) => void;
 };
@@ -404,9 +405,6 @@ export function useWebRTC({
                 peer.oniceconnectionstatechange =
                     null;
 
-                peer.onicegatheringstatechange =
-                    null;
-
                 try {
                     peer.close();
                 } catch {
@@ -456,7 +454,7 @@ export function useWebRTC({
 
             iceServersRef.current =
                 DEFAULT_ICE_SERVERS.iceServers ??
-                [];
+                    [];
 
             isMutedRef.current =
                 false;
@@ -1194,27 +1192,110 @@ export function useWebRTC({
             [],
         );
 
+    /*
+     * Add local tracks only once.
+     *
+     * The caller's video preparation can execute once
+     * before the avatar track exists and again when the
+     * avatar track becomes available. Reusing the existing
+     * RTCRtpSenders prevents duplicate tracks.
+     */
     const addLocalTracks =
         useCallback(
             (
                 peer: RTCPeerConnection,
                 stream: MediaStream,
             ) => {
-                const result =
-                    addLocalTracksToPeer(
-                        peer,
-                        stream,
+                /*
+                 * Normal first-time setup.
+                 */
+                if (
+                    !videoSenderRef.current &&
+                    !audioSenderRef.current
+                ) {
+                    const result =
+                        addLocalTracksToPeer(
+                            peer,
+                            stream,
+                        );
+
+                    videoSenderRef.current =
+                        result.videoSender;
+
+                    audioSenderRef.current =
+                        result.audioSender;
+
+                    setIsVideoSenderReady(
+                        result.videoSender !== null,
                     );
 
-                videoSenderRef.current =
-                    result.videoSender;
+                    return;
+                }
 
-                setIsVideoSenderReady(
-                    result.videoSender !== null,
-                );
+                /*
+                 * Defensive recovery for a video sender
+                 * that was not created during an earlier pass.
+                 */
+                if (
+                    callTypeRef.current ===
+                        "video" &&
+                    !videoSenderRef.current
+                ) {
+                    const result =
+                        addLocalTracksToPeer(
+                            peer,
+                            stream,
+                        );
 
-                audioSenderRef.current =
-                    result.audioSender;
+                    videoSenderRef.current =
+                        result.videoSender;
+
+                    if (
+                        result.videoSender
+                    ) {
+                        setIsVideoSenderReady(
+                            true,
+                        );
+                    }
+
+                    if (
+                        !audioSenderRef.current
+                    ) {
+                        audioSenderRef.current =
+                            result.audioSender;
+                    }
+
+                    return;
+                }
+
+                /*
+                 * Defensive recovery for an audio sender
+                 * that was not created during an earlier pass.
+                 */
+                if (
+                    !audioSenderRef.current
+                ) {
+                    const result =
+                        addLocalTracksToPeer(
+                            peer,
+                            stream,
+                        );
+
+                    audioSenderRef.current =
+                        result.audioSender;
+
+                    if (
+                        !videoSenderRef.current &&
+                        result.videoSender
+                    ) {
+                        videoSenderRef.current =
+                            result.videoSender;
+
+                        setIsVideoSenderReady(
+                            true,
+                        );
+                    }
+                }
             },
             [],
         );
@@ -1283,6 +1364,67 @@ export function useWebRTC({
             [
                 flushLocalIceCandidates,
                 sendSignalingEvent,
+            ],
+        );
+
+    /*
+     * Start the initial caller negotiation after the higher-level
+     * media coordinator has installed the desired video track.
+     *
+     * Voice calls still use the automatic caller path below.
+     * Video callers use this explicit entry point so the avatar
+     * track can replace the camera before the first SDP offer.
+     */
+    const startInitialOffer =
+        useCallback(
+            async (): Promise<void> => {
+                if (!isCallerRef.current) {
+                    throw new Error(
+                        "Only the caller can start the initial offer.",
+                    );
+                }
+
+                const peer =
+                    peerConnectionRef.current;
+
+                if (!peer) {
+                    throw new Error(
+                        "WebRTC peer connection is not available.",
+                    );
+                }
+
+                if (
+                    peer.connectionState === "closed" ||
+                    peer.connectionState === "failed"
+                ) {
+                    throw new Error(
+                        "WebRTC peer connection is no longer active.",
+                    );
+                }
+
+                if (
+                    callTypeRef.current === "video" &&
+                    !videoSenderRef.current
+                ) {
+                    throw new Error(
+                        "WebRTC video sender is not available.",
+                    );
+                }
+
+                if (negotiationStartedRef.current) {
+                    return;
+                }
+
+                await sendMediaState(
+                    !isMutedRef.current,
+                    isCameraEnabledRef.current,
+                );
+
+                await createOffer(peer);
+            },
+            [
+                createOffer,
+                sendMediaState,
             ],
         );
 
@@ -1743,8 +1885,12 @@ export function useWebRTC({
     ]);
 
     /*
-     * Caller prepares local media and creates
-     * the offer as soon as the callee accepts.
+     * Caller prepares local media and creates the peer connection.
+     *
+     * Voice calls negotiate immediately.
+     * Video calls stop after the local sender is prepared; the
+     * CallMediaSession coordinator installs the avatar track and
+     * explicitly calls startInitialOffer().
      */
     useEffect(() => {
         if (
@@ -1756,9 +1902,13 @@ export function useWebRTC({
             return;
         }
 
+        if (negotiationStartedRef.current) {
+            return;
+        }
+
         let cancelled = false;
 
-        async function startCaller() {
+        async function prepareCaller() {
             try {
                 const stream =
                     await ensureLocalMedia();
@@ -1768,6 +1918,10 @@ export function useWebRTC({
                 }
 
                 await loadIceConfig();
+
+                if (cancelled) {
+                    return;
+                }
 
                 const peer =
                     createPeerConnection();
@@ -1781,24 +1935,33 @@ export function useWebRTC({
                     return;
                 }
 
+                if (callType === "video") {
+                    setConnectionState(
+                        "connecting",
+                    );
+
+                    void sendMediaState(
+                        !isMutedRef.current,
+                        isCameraEnabledRef.current,
+                    );
+
+                    return;
+                }
+
                 void sendMediaState(
                     !isMutedRef.current,
                     isCameraEnabledRef.current,
                 );
 
-                await createOffer(
-                    peer,
-                );
+                await createOffer(peer);
             } catch (error) {
                 if (!cancelled) {
-                    reportFailure(
-                        error,
-                    );
+                    reportFailure(error);
                 }
             }
         }
 
-        void startCaller();
+        void prepareCaller();
 
         return () => {
             cancelled = true;
@@ -1870,6 +2033,7 @@ export function useWebRTC({
          */
         replaceVideoTrack,
         isVideoSenderReady,
+        startInitialOffer,
 
         cleanup,
     };

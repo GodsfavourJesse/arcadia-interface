@@ -40,13 +40,51 @@ export type AvatarHeadRotation = {
 };
 
 /**
+ * Face position relative to the camera.
+ *
+ * x/y:
+ * - approximately -1 = left/top
+ * - approximately  0 = center
+ * - approximately +1 = right/bottom
+ *
+ * scale:
+ * - relative face size
+ * - larger = face is closer to camera
+ */
+export type AvatarFaceState = {
+    x: number;
+    y: number;
+    scale: number;
+};
+
+/**
+ * Nose landmark position.
+ *
+ * These values are local camera-space tracking data.
+ *
+ * x/y:
+ * - normalized 0..1
+ *
+ * z:
+ * - MediaPipe relative depth
+ */
+export type AvatarNoseState = {
+    x: number;
+    y: number;
+    z: number;
+};
+
+/**
  * Eye state derived from local face tracking.
  *
- * Blink values are normalized to 0..1:
+ * Blink values:
  * - 0 = open
  * - 1 = fully closed
  *
- * Gaze values are normalized directional values.
+ * Gaze values:
+ * - -1 = left/down
+ * -  0 = center
+ * - +1 = right/up
  */
 export type AvatarEyeState = {
     leftBlink: number;
@@ -75,6 +113,8 @@ export type AvatarMouthState = {
  */
 export type AvatarTrackingState = {
     faceDetected: boolean;
+    face: AvatarFaceState;
+    nose: AvatarNoseState;
     head: AvatarHeadRotation;
     eyes: AvatarEyeState;
     mouth: AvatarMouthState;

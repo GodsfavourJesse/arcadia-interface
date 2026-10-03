@@ -5,493 +5,247 @@ import {
     useEffect,
     useRef,
     useState,
+    type MutableRefObject,
 } from "react";
 
 import {
     FaceLandmarker,
     FilesetResolver,
+    type FaceLandmarkerResult,
+    type NormalizedLandmark,
 } from "@mediapipe/tasks-vision";
 
 import type {
+    AvatarEyeState,
+    AvatarFaceState,
+    AvatarHeadRotation,
+    AvatarMouthState,
+    AvatarNoseState,
     AvatarTrackingState,
 } from "@/app/types/avatar/avatar.types";
 
 const MEDIAPIPE_WASM_URL =
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm";
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm";
 
 const FACE_LANDMARKER_MODEL_URL =
     "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
 
-const TRACKING_FPS = 30;
+/**
+ * MediaPipe inference target.
+ *
+ * The avatar renderer itself can continue at the display refresh rate.
+ */
+const INFERENCE_FPS = 30;
+const INFERENCE_INTERVAL = 1000 / INFERENCE_FPS;
 
-const FRAME_INTERVAL =
-    1000 / TRACKING_FPS;
+/**
+ * Small tolerance prevents unnecessary skipped frames when
+ * camera timestamps are slightly irregular.
+ */
+const INFERENCE_INTERVAL_TOLERANCE = 0.9;
 
-const HEAD_SMOOTHING = 0.3;
-const EYE_SMOOTHING = 0.4;
-const MOUTH_SMOOTHING = 0.35;
-const GAZE_SMOOTHING = 0.3;
+/**
+ * Keep the last valid tracking result briefly when MediaPipe
+ * temporarily misses the face.
+ */
+const FACE_LOSS_GRACE_MS = 180;
 
-const MAX_HEAD_YAW =
-    Math.PI / 2;
+/**
+ * React UI does not need to render at inference frequency.
+ */
+const UI_UPDATE_INTERVAL = 100;
 
-const MAX_HEAD_PITCH =
-    Math.PI / 3;
+/**
+ * MediaPipe confidence configuration.
+ */
+const MIN_FACE_DETECTION_CONFIDENCE = 0.35;
+const MIN_FACE_PRESENCE_CONFIDENCE = 0.35;
+const MIN_TRACKING_CONFIDENCE = 0.40;
 
-const MAX_HEAD_ROLL =
-    Math.PI / 3;
+/**
+ * Pose limits.
+ */
+const MAX_YAW = Math.PI / 2;
+const MAX_PITCH = Math.PI / 3;
+const MAX_ROLL = Math.PI / 2;
 
-const DEFAULT_TRACKING: AvatarTrackingState = {
-    faceDetected: false,
+/**
+ * Smoothing response speeds.
+ *
+ * These are response rates rather than frame-dependent
+ * interpolation coefficients.
+ *
+ * Higher = faster response.
+ */
+const HEAD_RESPONSE = 15;
+const EYE_RESPONSE = 24;
+const GAZE_RESPONSE = 22;
+const MOUTH_RESPONSE = 20;
+const FACE_POSITION_RESPONSE = 16;
+const FACE_SCALE_RESPONSE = 12;
 
-    head: {
-        yaw: 0,
-        pitch: 0,
-        roll: 0,
-    },
+const BLINK_OPEN_THRESHOLD = 0.12;
+const BLINK_CLOSE_THRESHOLD = 0.28;
 
-    eyes: {
-        leftBlink: 0,
-        rightBlink: 0,
-        gazeX: 0,
-        gazeY: 0,
-    },
+const BLINK_CLOSE_RESPONSE = 34;
+const BLINK_OPEN_RESPONSE = 24;
+const BLINK_FAST_RESPONSE = 42;
 
-    mouth: {
-        open: 0,
-        smile: 0,
-        funnel: 0,
-        pucker: 0,
-    },
+/**
+ * Fast-motion response.
+ */
+const HEAD_FAST_RESPONSE = 28;
+const EXPRESSION_FAST_RESPONSE = 32;
 
-    timestamp: 0,
-};
+/**
+ * Maximum delta used by the tracking filters.
+ */
+const MAX_DELTA_SECONDS = 0.1;
 
-type UseFaceTrackingOptions = {
+/**
+ * Face position sensitivity.
+ */
+const FACE_POSITION_SCALE = 2.0;
+
+/**
+ * Face scale normalization.
+ *
+ * This is based on the distance between the outer eye landmarks.
+ */
+const FACE_SCALE_REFERENCE = 0.22;
+
+export type UseFaceTrackingOptions = {
     video: HTMLVideoElement | null;
     enabled?: boolean;
 };
 
-type UseFaceTrackingResult = {
+export type UseFaceTrackingResult = {
     tracking: AvatarTrackingState;
+    trackingRef: MutableRefObject<AvatarTrackingState>;
     isReady: boolean;
     isTracking: boolean;
     error: string | null;
 };
 
-type BlendshapeCategory = {
-    categoryName?: string;
-    score?: number;
+type ScalarFilter = {
+    value: number;
+    velocity: number;
+    active?: boolean;
 };
 
-type FaceLandmark = {
-    x: number;
-    y: number;
-    z: number;
+type TrackingFilters = {
+    faceX: ScalarFilter;
+    faceY: ScalarFilter;
+    faceScale: ScalarFilter;
+
+    noseX: ScalarFilter;
+    noseY: ScalarFilter;
+    noseZ: ScalarFilter;
+
+    yaw: ScalarFilter;
+    pitch: ScalarFilter;
+    roll: ScalarFilter;
+
+    leftBlink: ScalarFilter;
+    rightBlink: ScalarFilter;
+
+    mouthOpen: ScalarFilter;
+    smile: ScalarFilter;
+    funnel: ScalarFilter;
+    pucker: ScalarFilter;
+
+    gazeX: ScalarFilter;
+    gazeY: ScalarFilter;
 };
-
-type HeadRotation = {
-    yaw: number;
-    pitch: number;
-    roll: number;
-};
-
-type EyeState = {
-    leftBlink: number;
-    rightBlink: number;
-    gazeX: number;
-    gazeY: number;
-};
-
-type MouthState = {
-    open: number;
-    smile: number;
-    funnel: number;
-    pucker: number;
-};
-
-function clamp(
-    value: number,
-    min = 0,
-    max = 1,
-): number {
-    return Math.min(
-        Math.max(value, min),
-        max,
-    );
-}
-
-function clampAngle(
-    value: number,
-    min: number,
-    max: number,
-): number {
-    return Math.min(
-        Math.max(value, min),
-        max,
-    );
-}
-
-function getBlendshapeScore(
-    categories: BlendshapeCategory[],
-    name: string,
-): number {
-    const category = categories.find(
-        (item) =>
-            item.categoryName === name,
-    );
-
-    return category?.score ?? 0;
-}
-
-function smoothValue(
-    previous: number,
-    next: number,
-    factor: number,
-): number {
-    return (
-        previous +
-        (next - previous) * factor
-    );
-}
 
 /**
- * Calculates a lightweight head rotation estimate
- * from stable facial landmarks.
- *
- * The returned values are radians, matching
- * AvatarHeadRotation's public contract.
+ * MediaPipe's WASM runtime can emit some informational messages
+ * through stderr, which Next.js may surface through console.error.
  */
-function calculateHeadRotation(
-    landmarks: FaceLandmark[],
-): HeadRotation {
-    const nose = landmarks[1];
+const MEDIAPIPE_INFO_PATTERN =
+    /Created TensorFlow Lite XNNPACK delegate for CPU/i;
 
-    const leftEye = landmarks[33];
+let mediaPipeLogFilterInstalled = false;
 
-    const rightEye = landmarks[263];
-
+function installMediaPipeLogFilter(): void {
     if (
-        !nose ||
-        !leftEye ||
-        !rightEye
+        mediaPipeLogFilterInstalled ||
+        typeof window === "undefined"
     ) {
-        return {
-            yaw: 0,
-            pitch: 0,
-            roll: 0,
-        };
+        return;
     }
 
-    const eyeCenterX =
-        (leftEye.x + rightEye.x) / 2;
+    mediaPipeLogFilterInstalled = true;
 
-    const eyeCenterY =
-        (leftEye.y + rightEye.y) / 2;
+    const originalError = console.error;
 
-    const eyeDistance = Math.max(
-        Math.hypot(
-            rightEye.x - leftEye.x,
-            rightEye.y - leftEye.y,
-        ),
-        0.001,
-    );
+    console.error = (...args: unknown[]) => {
+        const first = args[0];
 
-    const horizontalOffset =
-        (nose.x - eyeCenterX) /
-        eyeDistance;
+        if (
+            typeof first === "string" &&
+            MEDIAPIPE_INFO_PATTERN.test(first)
+        ) {
+            console.info(first);
+            return;
+        }
 
-    const verticalOffset =
-        (nose.y - eyeCenterY) /
-        eyeDistance;
-
-    const roll = Math.atan2(
-        rightEye.y - leftEye.y,
-        rightEye.x - leftEye.x,
-    );
-
-    /*
-     * Convert the normalized landmark offsets
-     * into actual angular values in radians.
-     *
-     * These are intentionally conservative because
-     * the VRM renderer applies its own presentation
-     * scaling.
-     */
-    const normalizedYaw = clampAngle(
-        horizontalOffset * 1.25,
-        -1,
-        1,
-    );
-
-    const normalizedPitch = clampAngle(
-        verticalOffset * 0.9,
-        -1,
-        1,
-    );
-
-    return {
-        yaw:
-            normalizedYaw *
-            MAX_HEAD_YAW,
-
-        pitch:
-            normalizedPitch *
-            MAX_HEAD_PITCH,
-
-        roll: clampAngle(
-            roll,
-            -MAX_HEAD_ROLL,
-            MAX_HEAD_ROLL,
-        ),
+        originalError.apply(console, args);
     };
 }
 
-function calculateEyeState(
-    blendshapes: BlendshapeCategory[],
-): EyeState {
-    const leftBlink = clamp(
-        getBlendshapeScore(
-            blendshapes,
-            "eyeBlinkLeft",
-        ),
-    );
-
-    const rightBlink = clamp(
-        getBlendshapeScore(
-            blendshapes,
-            "eyeBlinkRight",
-        ),
-    );
-
-    const leftLookIn =
-        getBlendshapeScore(
-            blendshapes,
-            "eyeLookInLeft",
-        );
-
-    const leftLookOut =
-        getBlendshapeScore(
-            blendshapes,
-            "eyeLookOutLeft",
-        );
-
-    const rightLookIn =
-        getBlendshapeScore(
-            blendshapes,
-            "eyeLookInRight",
-        );
-
-    const rightLookOut =
-        getBlendshapeScore(
-            blendshapes,
-            "eyeLookOutRight",
-        );
-
-    const leftLookUp =
-        getBlendshapeScore(
-            blendshapes,
-            "eyeLookUpLeft",
-        );
-
-    const rightLookUp =
-        getBlendshapeScore(
-            blendshapes,
-            "eyeLookUpRight",
-        );
-
-    const leftLookDown =
-        getBlendshapeScore(
-            blendshapes,
-            "eyeLookDownLeft",
-        );
-
-    const rightLookDown =
-        getBlendshapeScore(
-            blendshapes,
-            "eyeLookDownRight",
-        );
-
-    const gazeX = clamp(
-        (
-            (leftLookOut - leftLookIn) +
-            (rightLookIn - rightLookOut)
-        ) / 2,
-        -1,
-        1,
-    );
-
-    const gazeY = clamp(
-        (
-            (leftLookDown - leftLookUp) +
-            (rightLookDown - rightLookUp)
-        ) / 2,
-        -1,
-        1,
-    );
-
+function createFilter(
+    value = 0,
+): ScalarFilter {
     return {
-        leftBlink,
-        rightBlink,
-        gazeX,
-        gazeY,
+        value,
+        velocity: 0,
+        active: false,
     };
 }
 
-function calculateMouthState(
-    blendshapes: BlendshapeCategory[],
-): MouthState {
-    const jawOpen =
-        getBlendshapeScore(
-            blendshapes,
-            "jawOpen",
-        );
-
-    const mouthOpen =
-        getBlendshapeScore(
-            blendshapes,
-            "mouthOpen",
-        );
-
-    const mouthOpenValue = clamp(
-        Math.max(
-            jawOpen,
-            mouthOpen,
-        ),
-    );
-
-    const smileLeft =
-        getBlendshapeScore(
-            blendshapes,
-            "mouthSmileLeft",
-        );
-
-    const smileRight =
-        getBlendshapeScore(
-            blendshapes,
-            "mouthSmileRight",
-        );
-
-    const smile = clamp(
-        (smileLeft + smileRight) / 2,
-    );
-
-    const funnel = clamp(
-        getBlendshapeScore(
-            blendshapes,
-            "mouthFunnel",
-        ),
-    );
-
-    const pucker = clamp(
-        getBlendshapeScore(
-            blendshapes,
-            "mouthPucker",
-        ),
-    );
-
+function createFilters(): TrackingFilters {
     return {
-        open: mouthOpenValue,
-        smile,
-        funnel,
-        pucker,
+        faceX: createFilter(),
+        faceY: createFilter(),
+        faceScale: createFilter(),
+
+        noseX: createFilter(),
+        noseY: createFilter(),
+        noseZ: createFilter(),
+
+        yaw: createFilter(),
+        pitch: createFilter(),
+        roll: createFilter(),
+
+        leftBlink: createFilter(),
+        rightBlink: createFilter(),
+
+        mouthOpen: createFilter(),
+        smile: createFilter(),
+        funnel: createFilter(),
+        pucker: createFilter(),
+
+        gazeX: createFilter(),
+        gazeY: createFilter(),
     };
 }
 
-function smoothTracking(
-    previous: AvatarTrackingState,
-    next: {
-        head: HeadRotation;
-        eyes: EyeState;
-        mouth: MouthState;
-        timestamp: number;
-    },
-): AvatarTrackingState {
-    return {
-        faceDetected: true,
-
-        head: {
-            yaw: smoothValue(
-                previous.head.yaw,
-                next.head.yaw,
-                HEAD_SMOOTHING,
-            ),
-
-            pitch: smoothValue(
-                previous.head.pitch,
-                next.head.pitch,
-                HEAD_SMOOTHING,
-            ),
-
-            roll: smoothValue(
-                previous.head.roll,
-                next.head.roll,
-                HEAD_SMOOTHING,
-            ),
-        },
-
-        eyes: {
-            leftBlink: smoothValue(
-                previous.eyes.leftBlink,
-                next.eyes.leftBlink,
-                EYE_SMOOTHING,
-            ),
-
-            rightBlink: smoothValue(
-                previous.eyes.rightBlink,
-                next.eyes.rightBlink,
-                EYE_SMOOTHING,
-            ),
-
-            gazeX: smoothValue(
-                previous.eyes.gazeX,
-                next.eyes.gazeX,
-                GAZE_SMOOTHING,
-            ),
-
-            gazeY: smoothValue(
-                previous.eyes.gazeY,
-                next.eyes.gazeY,
-                GAZE_SMOOTHING,
-            ),
-        },
-
-        mouth: {
-            open: smoothValue(
-                previous.mouth.open,
-                next.mouth.open,
-                MOUTH_SMOOTHING,
-            ),
-
-            smile: smoothValue(
-                previous.mouth.smile,
-                next.mouth.smile,
-                MOUTH_SMOOTHING,
-            ),
-
-            funnel: smoothValue(
-                previous.mouth.funnel,
-                next.mouth.funnel,
-                MOUTH_SMOOTHING,
-            ),
-
-            pucker: smoothValue(
-                previous.mouth.pucker,
-                next.mouth.pucker,
-                MOUTH_SMOOTHING,
-            ),
-        },
-
-        timestamp:
-            next.timestamp,
-    };
-}
-
-function createNoFaceTracking(
-    timestamp: number,
-): AvatarTrackingState {
+function createNeutralTracking(): AvatarTrackingState {
     return {
         faceDetected: false,
+
+        face: {
+            x: 0,
+            y: 0,
+            scale: 1,
+        },
+
+        nose: {
+            x: 0.5,
+            y: 0.5,
+            z: 0,
+        },
 
         head: {
             yaw: 0,
@@ -513,8 +267,834 @@ function createNoFaceTracking(
             pucker: 0,
         },
 
-        timestamp,
+        timestamp: 0,
     };
+}
+
+function clamp(
+    value: number,
+    min: number,
+    max: number,
+): number {
+    return Math.min(
+        max,
+        Math.max(min, value),
+    );
+}
+
+function clamp01(
+    value: number,
+): number {
+    return clamp(value, 0, 1);
+}
+
+function getBlendshapeScore(
+    result: FaceLandmarkerResult,
+    name: string,
+): number {
+    const categories =
+        result.faceBlendshapes?.[0]?.categories;
+
+    if (!categories) {
+        return 0;
+    }
+
+    const category =
+        categories.find(
+            (item) =>
+                item.categoryName === name,
+        );
+
+    return category?.score ?? 0;
+}
+
+function normalizeAngle(
+    angle: number,
+): number {
+    let value = angle;
+
+    while (value > Math.PI) {
+        value -= Math.PI * 2;
+    }
+
+    while (value < -Math.PI) {
+        value += Math.PI * 2;
+    }
+
+    return value;
+}
+
+/**
+ * Delta-time based exponential smoothing.
+ *
+ * Unlike:
+ *
+ *     value += (target - value) * 0.2
+ *
+ * this behaves consistently across different display
+ * refresh rates.
+ */
+function smoothScalar(
+    filter: ScalarFilter,
+    target: number,
+    response: number,
+    fastResponse: number,
+    deltaSeconds: number,
+): number {
+    const safeDelta =
+        clamp(
+            deltaSeconds,
+            0.001,
+            MAX_DELTA_SECONDS,
+        );
+
+    const difference =
+        target - filter.value;
+
+    const rawVelocity =
+        difference / safeDelta;
+
+    filter.velocity +=
+        (rawVelocity - filter.velocity) *
+        0.45;
+
+    const speed =
+        Math.abs(filter.velocity);
+
+    const speedNormalized =
+        clamp(
+            speed / 3,
+            0,
+            1,
+        );
+
+    const adaptiveResponse =
+        response +
+        (fastResponse - response) *
+            speedNormalized;
+
+    const alpha =
+        1 -
+        Math.exp(
+            -adaptiveResponse *
+                safeDelta,
+        );
+
+    filter.value +=
+        difference * alpha;
+
+    return filter.value;
+}
+
+function smoothBlink(
+    filter: ScalarFilter,
+    rawValue: number,
+    deltaSeconds: number,
+): number {
+    const value = clamp01(rawValue);
+
+    /*
+     * Hysteresis:
+     *
+     * When the eye is open, it needs a meaningful
+     * coefficient before we consider it a blink.
+     *
+     * Once a blink has started, we keep it active
+     * until the coefficient falls sufficiently low.
+     */
+    if (filter.active) {
+        if (value <= BLINK_OPEN_THRESHOLD) {
+            filter.active = false;
+        }
+    } else {
+        if (value >= BLINK_CLOSE_THRESHOLD) {
+            filter.active = true;
+        }
+    }
+
+    /*
+     * Ignore MediaPipe's small open-eye noise completely.
+     */
+    const target = filter.active
+        ? clamp01(
+              (value - BLINK_OPEN_THRESHOLD) /
+                  (1 - BLINK_OPEN_THRESHOLD),
+          )
+        : 0;
+
+    const safeDelta = clamp(
+        deltaSeconds,
+        0.001,
+        MAX_DELTA_SECONDS,
+    );
+
+    const response = filter.active
+        ? BLINK_CLOSE_RESPONSE
+        : BLINK_OPEN_RESPONSE;
+
+    const difference =
+        target - filter.value;
+
+    const rawVelocity =
+        difference / safeDelta;
+
+    filter.velocity +=
+        (rawVelocity - filter.velocity) *
+        0.5;
+
+    const speed =
+        Math.abs(filter.velocity);
+
+    const adaptiveResponse =
+        response +
+        Math.min(
+            speed * 2,
+            BLINK_FAST_RESPONSE - response,
+        );
+
+    const alpha =
+        1 -
+        Math.exp(
+            -adaptiveResponse *
+                safeDelta,
+        );
+
+    filter.value +=
+        difference * alpha;
+
+    /*
+     * Prevent tiny residual values from keeping
+     * the avatar's eyelids microscopically closed.
+     */
+    if (
+        !filter.active &&
+        filter.value < 0.01
+    ) {
+        filter.value = 0;
+        filter.velocity = 0;
+    }
+
+    return clamp01(filter.value);
+}
+
+function extractHeadPoseFromMatrix(
+    result: FaceLandmarkerResult,
+): AvatarHeadRotation | null {
+    const matrix =
+        result.facialTransformationMatrixes?.[0];
+
+    if (
+        !matrix ||
+        matrix.data.length < 16
+    ) {
+        return null;
+    }
+
+    /*
+     * MediaPipe provides the facial transformation
+     * matrix in column-major layout.
+     *
+     * We extract an Euler representation using the
+     * Y-X-Z rotation order:
+     *
+     *     yaw   = Y
+     *     pitch = X
+     *     roll  = Z
+     */
+    const m = matrix.data;
+
+    const pitch =
+        Math.asin(
+            clamp(
+                -m[9],
+                -1,
+                1,
+            ),
+        );
+
+    const yaw =
+        Math.atan2(
+            m[8],
+            m[10],
+        );
+
+    const roll =
+        Math.atan2(
+            m[1],
+            m[5],
+        );
+
+    return {
+        yaw: clamp(
+            normalizeAngle(yaw),
+            -MAX_YAW,
+            MAX_YAW,
+        ),
+
+        pitch: clamp(
+            normalizeAngle(pitch),
+            -MAX_PITCH,
+            MAX_PITCH,
+        ),
+
+        roll: clamp(
+            normalizeAngle(roll),
+            -MAX_ROLL,
+            MAX_ROLL,
+        ),
+    };
+}
+
+function extractFallbackHeadPose(
+    landmarks: NormalizedLandmark[],
+): AvatarHeadRotation {
+    const nose =
+        landmarks[1];
+
+    const leftEye =
+        landmarks[33];
+
+    const rightEye =
+        landmarks[263];
+
+    if (
+        !nose ||
+        !leftEye ||
+        !rightEye
+    ) {
+        return {
+            yaw: 0,
+            pitch: 0,
+            roll: 0,
+        };
+    }
+
+    const eyeCenterX =
+        (leftEye.x + rightEye.x) /
+        2;
+
+    const eyeCenterY =
+        (leftEye.y + rightEye.y) /
+        2;
+
+    const eyeDistance =
+        Math.max(
+            Math.abs(
+                rightEye.x -
+                    leftEye.x,
+            ),
+            0.001,
+        );
+
+    const horizontalOffset =
+        (nose.x - eyeCenterX) /
+        eyeDistance;
+
+    const verticalOffset =
+        (nose.y - eyeCenterY) /
+        eyeDistance;
+
+    const roll =
+        Math.atan2(
+            rightEye.y -
+                leftEye.y,
+            rightEye.x -
+                leftEye.x,
+        );
+
+    return {
+        yaw: clamp(
+            horizontalOffset * 1.25,
+            -MAX_YAW,
+            MAX_YAW,
+        ),
+
+        pitch: clamp(
+            verticalOffset * 1.1,
+            -MAX_PITCH,
+            MAX_PITCH,
+        ),
+
+        roll: clamp(
+            roll,
+            -MAX_ROLL,
+            MAX_ROLL,
+        ),
+    };
+}
+
+function extractFace(
+    landmarks: NormalizedLandmark[],
+): {
+    face: AvatarFaceState;
+    nose: AvatarNoseState;
+} {
+    const nose =
+        landmarks[1];
+
+    const leftEye =
+        landmarks[33];
+
+    const rightEye =
+        landmarks[263];
+
+    if (
+        !nose ||
+        !leftEye ||
+        !rightEye
+    ) {
+        return {
+            face: {
+                x: 0,
+                y: 0,
+                scale: 1,
+            },
+
+            nose: {
+                x: 0.5,
+                y: 0.5,
+                z: 0,
+            },
+        };
+    }
+
+    const eyeCenterX =
+        (leftEye.x +
+            rightEye.x) /
+        2;
+
+    const eyeCenterY =
+        (leftEye.y +
+            rightEye.y) /
+        2;
+
+    const eyeDistance =
+        Math.max(
+            Math.abs(
+                rightEye.x -
+                    leftEye.x,
+            ),
+            0.001,
+        );
+
+    const faceX =
+        clamp(
+            (eyeCenterX - 0.5) *
+                FACE_POSITION_SCALE,
+            -1,
+            1,
+        );
+
+    const faceY =
+        clamp(
+            (eyeCenterY - 0.5) *
+                FACE_POSITION_SCALE,
+            -1,
+            1,
+        );
+
+    const faceScale =
+        clamp(
+            eyeDistance /
+                FACE_SCALE_REFERENCE,
+            0.55,
+            1.8,
+        );
+
+    return {
+        face: {
+            x: faceX,
+            y: faceY,
+            scale: faceScale,
+        },
+
+        nose: {
+            x: clamp(
+                nose.x,
+                0,
+                1,
+            ),
+
+            y: clamp(
+                nose.y,
+                0,
+                1,
+            ),
+
+            z: nose.z,
+        },
+    };
+}
+
+function extractEyes(
+    result: FaceLandmarkerResult,
+): AvatarEyeState {
+    const score =
+        (name: string) =>
+            getBlendshapeScore(
+                result,
+                name,
+            );
+
+    const leftBlink =
+        score("eyeBlinkLeft");
+
+    const rightBlink =
+        score("eyeBlinkRight");
+
+    const eyeLookInLeft =
+        score("eyeLookInLeft");
+
+    const eyeLookOutLeft =
+        score("eyeLookOutLeft");
+
+    const eyeLookInRight =
+        score("eyeLookInRight");
+
+    const eyeLookOutRight =
+        score("eyeLookOutRight");
+
+    const lookUpLeft =
+        score("eyeLookUpLeft");
+
+    const lookUpRight =
+        score("eyeLookUpRight");
+
+    const lookDownLeft =
+        score("eyeLookDownLeft");
+
+    const lookDownRight =
+        score("eyeLookDownRight");
+
+    const gazeX =
+        (
+            eyeLookOutLeft +
+            eyeLookOutRight -
+            eyeLookInLeft -
+            eyeLookInRight
+        ) / 2;
+
+    const gazeY =
+        (
+            lookUpLeft +
+            lookUpRight -
+            lookDownLeft -
+            lookDownRight
+        ) / 2;
+
+    return {
+        leftBlink:
+            clamp01(
+                leftBlink,
+            ),
+
+        rightBlink:
+            clamp01(
+                rightBlink,
+            ),
+
+        gazeX:
+            clamp(
+                gazeX,
+                -1,
+                1,
+            ),
+
+        gazeY:
+            clamp(
+                gazeY,
+                -1,
+                1,
+            ),
+    };
+}
+
+function extractMouth(
+    result: FaceLandmarkerResult,
+): AvatarMouthState {
+    const score =
+        (name: string) =>
+            getBlendshapeScore(
+                result,
+                name,
+            );
+
+    return {
+        open: clamp01(
+            Math.max(
+                score("jawOpen"),
+                score("mouthOpen"),
+            ),
+        ),
+
+        smile: clamp01(
+            (
+                score(
+                    "mouthSmileLeft",
+                ) +
+                score(
+                    "mouthSmileRight",
+                )
+            ) / 2,
+        ),
+
+        funnel: clamp01(
+            score(
+                "mouthFunnel",
+            ),
+        ),
+
+        pucker: clamp01(
+            score(
+                "mouthPucker",
+            ),
+        ),
+    };
+}
+
+function applyTrackingResult(
+    current: AvatarTrackingState,
+    result: FaceLandmarkerResult,
+    filters: TrackingFilters,
+    deltaSeconds: number,
+): void {
+    const landmarks =
+        result.faceLandmarks?.[0];
+
+    if (!landmarks) {
+        return;
+    }
+
+    const rawHead =
+        extractHeadPoseFromMatrix(
+            result,
+        ) ??
+        extractFallbackHeadPose(
+            landmarks,
+        );
+
+    const rawFace =
+        extractFace(
+            landmarks,
+        );
+
+    const rawEyes =
+        extractEyes(result);
+
+    const rawMouth =
+        extractMouth(result);
+
+    current.face.x =
+        smoothScalar(
+            filters.faceX,
+            rawFace.face.x,
+            FACE_POSITION_RESPONSE,
+            HEAD_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.face.y =
+        smoothScalar(
+            filters.faceY,
+            rawFace.face.y,
+            FACE_POSITION_RESPONSE,
+            HEAD_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.face.scale =
+        smoothScalar(
+            filters.faceScale,
+            rawFace.face.scale,
+            FACE_SCALE_RESPONSE,
+            HEAD_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.nose.x =
+        smoothScalar(
+            filters.noseX,
+            rawFace.nose.x,
+            FACE_POSITION_RESPONSE,
+            HEAD_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.nose.y =
+        smoothScalar(
+            filters.noseY,
+            rawFace.nose.y,
+            FACE_POSITION_RESPONSE,
+            HEAD_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.nose.z =
+        smoothScalar(
+            filters.noseZ,
+            rawFace.nose.z,
+            FACE_POSITION_RESPONSE,
+            HEAD_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.head.yaw =
+        smoothScalar(
+            filters.yaw,
+            rawHead.yaw,
+            HEAD_RESPONSE,
+            HEAD_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.head.pitch =
+        smoothScalar(
+            filters.pitch,
+            rawHead.pitch,
+            HEAD_RESPONSE,
+            HEAD_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.head.roll =
+        smoothScalar(
+            filters.roll,
+            rawHead.roll,
+            HEAD_RESPONSE,
+            HEAD_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+        current.eyes.leftBlink = smoothBlink(
+            filters.leftBlink,
+            rawEyes.leftBlink,
+            deltaSeconds,
+        );
+
+        current.eyes.rightBlink = smoothBlink(
+            filters.rightBlink,
+            rawEyes.rightBlink,
+            deltaSeconds,
+        );
+
+    current.eyes.gazeX =
+        smoothScalar(
+            filters.gazeX,
+            rawEyes.gazeX,
+            GAZE_RESPONSE,
+            EXPRESSION_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.eyes.gazeY =
+        smoothScalar(
+            filters.gazeY,
+            rawEyes.gazeY,
+            GAZE_RESPONSE,
+            EXPRESSION_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.mouth.open =
+        smoothScalar(
+            filters.mouthOpen,
+            rawMouth.open,
+            MOUTH_RESPONSE,
+            EXPRESSION_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.mouth.smile =
+        smoothScalar(
+            filters.smile,
+            rawMouth.smile,
+            MOUTH_RESPONSE,
+            EXPRESSION_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.mouth.funnel =
+        smoothScalar(
+            filters.funnel,
+            rawMouth.funnel,
+            MOUTH_RESPONSE,
+            EXPRESSION_FAST_RESPONSE,
+            deltaSeconds,
+        );
+
+    current.mouth.pucker =
+        smoothScalar(
+            filters.pucker,
+            rawMouth.pucker,
+            MOUTH_RESPONSE,
+            EXPRESSION_FAST_RESPONSE,
+            deltaSeconds,
+        );
+}
+
+function stringifyError(
+    error: unknown,
+): string {
+    if (error instanceof Error) {
+        return error.message;
+    }
+
+    return String(error);
+}
+
+async function createFaceLandmarker(): Promise<FaceLandmarker> {
+    const resolver =
+        await FilesetResolver.forVisionTasks(
+            MEDIAPIPE_WASM_URL,
+        );
+
+    const createWithDelegate = (
+        delegate: "GPU" | "CPU",
+    ) =>
+        FaceLandmarker.createFromOptions(
+            resolver,
+            {
+                baseOptions: {
+                    modelAssetPath:
+                        FACE_LANDMARKER_MODEL_URL,
+                    delegate,
+                },
+
+                runningMode: "VIDEO",
+
+                numFaces: 1,
+
+                minFaceDetectionConfidence:
+                    MIN_FACE_DETECTION_CONFIDENCE,
+
+                minFacePresenceConfidence:
+                    MIN_FACE_PRESENCE_CONFIDENCE,
+
+                minTrackingConfidence:
+                    MIN_TRACKING_CONFIDENCE,
+
+                outputFaceBlendshapes:
+                    true,
+
+                outputFacialTransformationMatrixes:
+                    true,
+            },
+        );
+
+    try {
+        return await createWithDelegate(
+            "GPU",
+        );
+    } catch (gpuError) {
+        console.warn(
+            "[Miyor] GPU face tracking initialization failed. Falling back to CPU.",
+            gpuError,
+        );
+
+        return createWithDelegate(
+            "CPU",
+        );
+    }
 }
 
 export function useFaceTracking({
@@ -522,33 +1102,57 @@ export function useFaceTracking({
     enabled = true,
 }: UseFaceTrackingOptions): UseFaceTrackingResult {
     const faceLandmarkerRef =
-        useRef<FaceLandmarker | null>(null);
-
-    const animationFrameRef =
-        useRef<number | null>(null);
-
-    const lastVideoTimeRef =
-        useRef<number>(-1);
-
-    const lastFrameTimeRef =
-        useRef<number>(0);
-
-    const trackingRef =
-        useRef<AvatarTrackingState>(
-            DEFAULT_TRACKING,
+        useRef<FaceLandmarker | null>(
+            null,
         );
 
     const mountedRef =
         useRef(true);
 
-    const initializationPromiseRef =
-        useRef<Promise<FaceLandmarker> | null>(
+    const trackingRef =
+        useRef<AvatarTrackingState>(
+            createNeutralTracking(),
+        );
+
+    const filtersRef =
+        useRef<TrackingFilters>(
+            createFilters(),
+        );
+
+    const lastInferenceTimeRef =
+        useRef(0);
+
+    const lastDetectionTimestampRef =
+        useRef(0);
+
+    const lastFaceSeenTimeRef =
+        useRef(0);
+
+    const lastProcessingTimeRef =
+        useRef(0);
+
+    const lastUiUpdateTimeRef =
+        useRef(0);
+
+    const frameCallbackIdRef =
+        useRef<number | null>(
             null,
         );
 
+    const animationFrameIdRef =
+        useRef<number | null>(
+            null,
+        );
+
+    const processingRef =
+        useRef(false);
+
+    const isTrackingRef =
+        useRef(false);
+
     const [tracking, setTracking] =
         useState<AvatarTrackingState>(
-            DEFAULT_TRACKING,
+            createNeutralTracking(),
         );
 
     const [isReady, setIsReady] =
@@ -558,209 +1162,156 @@ export function useFaceTracking({
         useState(false);
 
     const [error, setError] =
-        useState<string | null>(null);
+        useState<string | null>(
+            null,
+        );
+
+    const updateIsTracking =
+        useCallback(
+            (next: boolean) => {
+                if (
+                    isTrackingRef.current ===
+                    next
+                ) {
+                    return;
+                }
+
+                isTrackingRef.current =
+                    next;
+
+                setIsTracking(next);
+            },
+            [],
+        );
 
     const resetTracking =
         useCallback(() => {
+            const neutral =
+                createNeutralTracking();
+
             trackingRef.current =
-                DEFAULT_TRACKING;
+                neutral;
 
-            setTracking(
-                DEFAULT_TRACKING,
-            );
+            filtersRef.current =
+                createFilters();
 
-            setIsTracking(false);
-        }, []);
-
-    const stopAnimationLoop =
-        useCallback(() => {
-            if (
-                animationFrameRef.current !==
-                null
-            ) {
-                cancelAnimationFrame(
-                    animationFrameRef.current,
-                );
-
-                animationFrameRef.current =
-                    null;
-            }
-
-            lastVideoTimeRef.current =
-                -1;
-
-            lastFrameTimeRef.current =
+            lastFaceSeenTimeRef.current =
                 0;
 
-            setIsTracking(false);
-        }, []);
+            lastInferenceTimeRef.current =
+                0;
 
-    /*
-     * Keep the mounted flag accurate for asynchronous
-     * MediaPipe initialization.
-     */
+            lastDetectionTimestampRef.current =
+                0;
+
+            lastProcessingTimeRef.current =
+                0;
+
+            setTracking(
+                neutral,
+            );
+
+            updateIsTracking(
+                false,
+            );
+        }, [
+            updateIsTracking,
+        ]);
+
     useEffect(() => {
-        mountedRef.current = true;
+        mountedRef.current =
+            true;
 
         return () => {
-            mountedRef.current = false;
+            mountedRef.current =
+                false;
         };
     }, []);
 
-    /*
-     * Initialize MediaPipe when tracking is enabled
-     * and a video element is available.
-     *
-     * The detector remains browser-local.
-     * No landmarks, blendshapes, or tracking state
-     * are sent to the backend.
+    /**
+     * Initialize MediaPipe.
      */
     useEffect(() => {
-        let cancelled = false;
+        let cancelled =
+            false;
 
-        if (!enabled || !video) {
+        if (
+            !enabled ||
+            !video
+        ) {
             setIsReady(false);
-            setError(null);
             resetTracking();
 
-            return () => {
-                cancelled = true;
-            };
+            return;
         }
 
-        async function getFaceLandmarker(): Promise<FaceLandmarker> {
-            const existing =
-                faceLandmarkerRef.current;
+        installMediaPipeLogFilter();
 
-            if (existing) {
-                return existing;
-            }
+        const initialize =
+            async (): Promise<void> => {
+                try {
+                    setError(null);
 
-            const pending =
-                initializationPromiseRef.current;
+                    const landmarker =
+                        await createFaceLandmarker();
 
-            if (pending) {
-                return pending;
-            }
+                    if (
+                        cancelled ||
+                        !mountedRef.current
+                    ) {
+                        landmarker.close();
+                        return;
+                    }
 
-            const initialization =
-                (async () => {
-                    const vision =
-                        await FilesetResolver.forVisionTasks(
-                            MEDIAPIPE_WASM_URL,
-                        );
-
-                    return FaceLandmarker.createFromOptions(
-                        vision,
-                        {
-                            baseOptions: {
-                                modelAssetPath:
-                                    FACE_LANDMARKER_MODEL_URL,
-                                delegate: "GPU",
-                            },
-
-                            runningMode: "VIDEO",
-
-                            numFaces: 1,
-
-                            minFaceDetectionConfidence:
-                                0.5,
-
-                            minFacePresenceConfidence:
-                                0.5,
-
-                            minTrackingConfidence:
-                                0.5,
-
-                            outputFaceBlendshapes:
-                                true,
-
-                            outputFacialTransformationMatrixes:
-                                true,
-                        },
-                    );
-                })();
-
-            initializationPromiseRef.current =
-                initialization;
-
-            try {
-                const faceLandmarker =
-                    await initialization;
-
-                if (
-                    cancelled ||
-                    !mountedRef.current
-                ) {
-                    faceLandmarker.close();
-
-                    throw new Error(
-                        "Face tracking initialization was cancelled.",
-                    );
-                }
-
-                if (
-                    !faceLandmarkerRef.current
-                ) {
                     faceLandmarkerRef.current =
-                        faceLandmarker;
-                } else {
-                    faceLandmarker.close();
-                }
+                        landmarker;
 
-                return (
-                    faceLandmarkerRef.current
-                );
-            } finally {
-                if (
-                    initializationPromiseRef.current ===
-                    initialization
+                    setIsReady(true);
+
+                    console.info(
+                        "[Miyor] Real-time Face Landmarker ready.",
+                    );
+                } catch (
+                    initializationError
                 ) {
-                    initializationPromiseRef.current =
-                        null;
+                    if (
+                        cancelled ||
+                        !mountedRef.current
+                    ) {
+                        return;
+                    }
+
+                    console.error(
+                        "[Miyor] Face tracking initialization failed.",
+                        initializationError,
+                    );
+
+                    setError(
+                        stringifyError(
+                            initializationError,
+                        ),
+                    );
+
+                    setIsReady(false);
                 }
-            }
-        }
-
-        async function initialize(): Promise<void> {
-            try {
-                setError(null);
-
-                await getFaceLandmarker();
-
-                if (
-                    cancelled ||
-                    !mountedRef.current
-                ) {
-                    return;
-                }
-
-                setIsReady(true);
-            } catch (initializationError) {
-                if (
-                    cancelled ||
-                    !mountedRef.current
-                ) {
-                    return;
-                }
-
-                console.error(
-                    "[Avatar] Failed to initialize MediaPipe Face Landmarker:",
-                    initializationError,
-                );
-
-                setError(
-                    "Unable to initialize face tracking.",
-                );
-
-                setIsReady(false);
-            }
-        }
+            };
 
         void initialize();
 
         return () => {
             cancelled = true;
+
+            const landmarker =
+                faceLandmarkerRef.current;
+
+            faceLandmarkerRef.current =
+                null;
+
+            if (landmarker) {
+                landmarker.close();
+            }
+
+            setIsReady(false);
         };
     }, [
         enabled,
@@ -768,225 +1319,306 @@ export function useFaceTracking({
         resetTracking,
     ]);
 
-    /*
-     * Process video frames locally.
+    /**
+     * Process actual camera frames.
      */
     useEffect(() => {
         if (
             !enabled ||
             !video ||
-            !isReady
+            !isReady ||
+            !faceLandmarkerRef.current
         ) {
-            stopAnimationLoop();
-            resetTracking();
-
             return;
         }
 
-        const faceLandmarker =
-            faceLandmarkerRef.current;
+        let cancelled =
+            false;
 
-        if (!faceLandmarker) {
-            return;
-        }
+        const supportsVideoFrameCallback =
+            "requestVideoFrameCallback" in
+            HTMLVideoElement.prototype;
 
-        let cancelled = false;
-
-        const processFrame = (
-            timestamp: number,
-        ): void => {
-            if (
-                cancelled ||
-                !mountedRef.current
-            ) {
-                return;
-            }
-
-            animationFrameRef.current =
-                requestAnimationFrame(
-                    processFrame,
-                );
-
-            if (
-                video.readyState <
-                HTMLMediaElement.HAVE_CURRENT_DATA
-            ) {
-                return;
-            }
-
-            if (
-                video.videoWidth <= 0 ||
-                video.videoHeight <= 0
-            ) {
-                return;
-            }
-
-            if (
-                timestamp -
-                    lastFrameTimeRef.current <
-                FRAME_INTERVAL
-            ) {
-                return;
-            }
-
-            lastFrameTimeRef.current =
-                timestamp;
-
-            const videoTime =
-                video.currentTime;
-
-            if (
-                videoTime ===
-                lastVideoTimeRef.current
-            ) {
-                return;
-            }
-
-            lastVideoTimeRef.current =
-                videoTime;
-
-            try {
-                const result =
-                    faceLandmarker.detectForVideo(
-                        video,
-                        timestamp,
-                    );
-
-                const landmarks =
-                    result.faceLandmarks?.[0];
-
-                if (
-                    !landmarks ||
-                    landmarks.length === 0
-                ) {
-                    const noFace =
-                        createNoFaceTracking(
-                            performance.now(),
-                        );
-
-                    trackingRef.current =
-                        noFace;
-
-                    setTracking(noFace);
-                    setIsTracking(false);
-
+        const scheduleNextFrame =
+            (): void => {
+                if (cancelled) {
                     return;
                 }
 
-                const blendshapes =
-                    result.faceBlendshapes?.[0]
-                        ?.categories ?? [];
+                if (
+                    supportsVideoFrameCallback
+                ) {
+                    frameCallbackIdRef.current =
+                        video.requestVideoFrameCallback(
+                            processFrame,
+                        );
+                } else {
+                    animationFrameIdRef.current =
+                        requestAnimationFrame(
+                            processFrame,
+                        );
+                }
+            };
 
-                const head =
-                    calculateHeadRotation(
-                        landmarks,
-                    );
+        const processFrame =
+            (): void => {
+                if (cancelled) {
+                    return;
+                }
 
-                const eyes =
-                    calculateEyeState(
-                        blendshapes,
-                    );
+                scheduleNextFrame();
 
-                const mouth =
-                    calculateMouthState(
-                        blendshapes,
-                    );
+                if (
+                    processingRef.current
+                ) {
+                    return;
+                }
 
-                const previous =
-                    trackingRef.current;
+                if (
+                    video.readyState <
+                    HTMLMediaElement.HAVE_CURRENT_DATA
+                ) {
+                    return;
+                }
 
-                const nextTracking =
-                    smoothTracking(
-                        previous,
-                        {
-                            head,
-                            eyes,
-                            mouth,
+                if (
+                    video.videoWidth <= 0 ||
+                    video.videoHeight <= 0
+                ) {
+                    return;
+                }
+
+                const now =
+                    performance.now();
+
+                if (
+                    now -
+                        lastInferenceTimeRef.current <
+                    INFERENCE_INTERVAL *
+                        INFERENCE_INTERVAL_TOLERANCE
+                ) {
+                    return;
+                }
+
+                lastInferenceTimeRef.current =
+                    now;
+
+                const landmarker =
+                    faceLandmarkerRef.current;
+
+                if (!landmarker) {
+                    return;
+                }
+
+                processingRef.current =
+                    true;
+
+                try {
+                    const timestamp =
+                        Math.max(
+                            Math.round(
+                                now,
+                            ),
+                            lastDetectionTimestampRef.current +
+                                1,
+                        );
+
+                    lastDetectionTimestampRef.current =
+                        timestamp;
+
+                    const result =
+                        landmarker.detectForVideo(
+                            video,
+                            timestamp,
+                        );
+
+                    const currentTime =
+                        performance.now();
+
+                    const deltaSeconds =
+                        lastProcessingTimeRef.current >
+                        0
+                            ? (
+                                  currentTime -
+                                  lastProcessingTimeRef.current
+                              ) / 1000
+                            : 1 /
+                              INFERENCE_FPS;
+
+                    lastProcessingTimeRef.current =
+                        currentTime;
+
+                    const hasFace =
+                        Boolean(
+                            result.faceLandmarks?.[0],
+                        );
+
+                    if (hasFace) {
+                        lastFaceSeenTimeRef.current =
+                            currentTime;
+
+                        trackingRef.current.faceDetected =
+                            true;
+
+                        applyTrackingResult(
+                            trackingRef.current,
+                            result,
+                            filtersRef.current,
+                            deltaSeconds,
+                        );
+
+                        trackingRef.current.timestamp =
+                            Date.now();
+
+                        updateIsTracking(
+                            true,
+                        );
+
+                        setError(
+                            (previous) =>
+                                previous ===
+                                null
+                                    ? previous
+                                    : null,
+                        );
+                    } else {
+                        const timeSinceFace =
+                            currentTime -
+                            lastFaceSeenTimeRef.current;
+
+                        if (
+                            timeSinceFace <=
+                            FACE_LOSS_GRACE_MS
+                        ) {
+                            trackingRef.current.faceDetected =
+                                true;
+
+                            trackingRef.current.timestamp =
+                                Date.now();
+                        } else {
+                            trackingRef.current.faceDetected =
+                                false;
+
+                            trackingRef.current.timestamp =
+                                Date.now();
+
+                            updateIsTracking(
+                                false,
+                            );
+                        }
+                    }
+
+                    if (
+                        currentTime -
+                            lastUiUpdateTimeRef.current >=
+                        UI_UPDATE_INTERVAL
+                    ) {
+                        lastUiUpdateTimeRef.current =
+                            currentTime;
+
+                        setTracking({
+                            faceDetected:
+                                trackingRef
+                                    .current
+                                    .faceDetected,
+
+                            face: {
+                                ...trackingRef
+                                    .current
+                                    .face,
+                            },
+
+                            nose: {
+                                ...trackingRef
+                                    .current
+                                    .nose,
+                            },
+
+                            head: {
+                                ...trackingRef
+                                    .current
+                                    .head,
+                            },
+
+                            eyes: {
+                                ...trackingRef
+                                    .current
+                                    .eyes,
+                            },
+
+                            mouth: {
+                                ...trackingRef
+                                    .current
+                                    .mouth,
+                            },
+
                             timestamp:
-                                performance.now(),
-                        },
+                                trackingRef
+                                    .current
+                                    .timestamp,
+                        });
+                    }
+                } catch (
+                    detectionError
+                ) {
+                    console.warn(
+                        "[Miyor] Face tracking frame failed.",
+                        detectionError,
                     );
+                } finally {
+                    processingRef.current =
+                        false;
+                }
+            };
 
-                trackingRef.current =
-                    nextTracking;
+        lastProcessingTimeRef.current =
+            0;
 
-                setTracking(
-                    nextTracking,
-                );
+        lastInferenceTimeRef.current =
+            0;
 
-                setIsTracking(true);
-            } catch (trackingError) {
-                console.error(
-                    "[Avatar] Face tracking frame failed:",
-                    trackingError,
-                );
-            }
-        };
-
-        lastVideoTimeRef.current =
-            -1;
-
-        lastFrameTimeRef.current =
-            performance.now();
-
-        animationFrameRef.current =
-            requestAnimationFrame(
-                processFrame,
-            );
+        scheduleNextFrame();
 
         return () => {
             cancelled = true;
-            stopAnimationLoop();
+
+            if (
+                frameCallbackIdRef.current !==
+                null
+            ) {
+                video.cancelVideoFrameCallback?.(
+                    frameCallbackIdRef.current,
+                );
+
+                frameCallbackIdRef.current =
+                    null;
+            }
+
+            if (
+                animationFrameIdRef.current !==
+                null
+            ) {
+                cancelAnimationFrame(
+                    animationFrameIdRef.current,
+                );
+
+                animationFrameIdRef.current =
+                    null;
+            }
+
+            processingRef.current =
+                false;
         };
     }, [
         enabled,
         video,
         isReady,
-        resetTracking,
-        stopAnimationLoop,
+        updateIsTracking,
     ]);
-
-    /*
-     * Final detector cleanup.
-     *
-     * The detector is kept alive while the hook remains
-     * mounted so enabling/disabling tracking does not
-     * repeatedly recreate the MediaPipe model.
-     */
-    useEffect(() => {
-        return () => {
-            mountedRef.current =
-                false;
-
-            if (
-                animationFrameRef.current !==
-                null
-            ) {
-                cancelAnimationFrame(
-                    animationFrameRef.current,
-                );
-
-                animationFrameRef.current =
-                    null;
-            }
-
-            const faceLandmarker =
-                faceLandmarkerRef.current;
-
-            if (faceLandmarker) {
-                faceLandmarker.close();
-
-                faceLandmarkerRef.current =
-                    null;
-            }
-
-            initializationPromiseRef.current =
-                null;
-        };
-    }, []);
 
     return {
         tracking,
+        trackingRef,
         isReady,
         isTracking,
         error,

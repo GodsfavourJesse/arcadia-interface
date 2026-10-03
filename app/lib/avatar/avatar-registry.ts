@@ -28,7 +28,7 @@ export const AVATAR_REGISTRY: readonly AvatarDefinition[] = [
         enabled: true,
         capabilities: {
             headTracking: true,
-            eyeTracking: true,
+            eyeTracking: false,
             mouthTracking: true,
             facialExpressions: true,
         },

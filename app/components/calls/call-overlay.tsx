@@ -3,7 +3,6 @@
 import {
     useCallback,
     useEffect,
-    useMemo,
     useRef,
     useState,
     type ReactNode,
@@ -30,6 +29,10 @@ import {
 } from "@/app/hooks/avatar/useAvatarMedia";
 
 import {
+    useAvatarSelection,
+} from "@/app/hooks/avatar/useAvatarSelection";
+
+import {
     useCallStore,
 } from "@/app/store/calls/call.store";
 
@@ -37,6 +40,10 @@ import {
     CALL_STATE,
     CALL_TYPE,
 } from "@/app/types/calls/calls.types";
+
+import type {
+    AvatarDefinition,
+} from "@/app/types/avatar/avatar.types";
 
 import {
     CallControls,
@@ -53,7 +60,10 @@ import {
 import {
     AvatarPreview,
 } from "../avatar/avatar-preview";
-import { AVATAR_RENDER_MODE, AVATAR_TYPE, AvatarDefinition } from "@/app/types/avatar/avatar.types";
+
+import {
+    AvatarCard,
+} from "../avatar/avatar-card";
 
 type Profile = {
     displayName: string;
@@ -340,6 +350,169 @@ function SpeakerIcon({
     );
 }
 
+function CloseIcon() {
+    return (
+        <svg
+            viewBox="0 0 24 24"
+            className="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            aria-hidden="true"
+        >
+            <path
+                d="M6 6l12 12M18 6 6 18"
+                strokeLinecap="round"
+            />
+        </svg>
+    );
+}
+
+function CheckIcon() {
+    return (
+        <svg
+            viewBox="0 0 20 20"
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+        >
+            <path
+                d="m5 10 3 3 7-7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
+        </svg>
+    );
+}
+
+function AvatarPicker({
+    avatars,
+    selectedAvatar,
+    isAvatarActive,
+    disabled,
+    onSelect,
+    onUseAvatar,
+    onUseCamera,
+    onClose,
+}: {
+    avatars: readonly AvatarDefinition[];
+    selectedAvatar: AvatarDefinition | null;
+    isAvatarActive: boolean;
+    disabled: boolean;
+    onSelect: (avatar: AvatarDefinition) => void;
+    onUseAvatar: () => void;
+    onUseCamera: () => void;
+    onClose: () => void;
+}) {
+    return (
+        <div
+            className="absolute bottom-full left-1/2 z-50 mb-4 w-[min(92vw,520px)] -translate-x-1/2 overflow-hidden rounded-3xl border border-white/10 bg-slate-950/95 p-4 shadow-2xl shadow-black/50 backdrop-blur-2xl"
+            role="dialog"
+            aria-label="Choose avatar"
+        >
+            <div className="mb-4 flex items-center justify-between">
+                <div>
+                    <h2 className="text-sm font-semibold text-white">
+                        Choose avatar
+                    </h2>
+
+                    <p className="mt-1 text-xs text-white/45">
+                        Your camera powers the avatar's movements.
+                    </p>
+                </div>
+
+                <button
+                    type="button"
+                    onClick={onClose}
+                    aria-label="Close avatar picker"
+                    className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/70 transition hover:bg-white/10 hover:text-white"
+                >
+                    <CloseIcon />
+                </button>
+            </div>
+
+            <div className="grid max-h-[min(52vh,420px)] grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3">
+                {avatars.map((avatar) => (
+                    <AvatarCard
+                        key={avatar.id}
+                        avatar={avatar}
+                        selected={
+                            selectedAvatar?.id ===
+                            avatar.id
+                        }
+                        disabled={disabled}
+                        onSelect={onSelect}
+                    />
+                ))}
+            </div>
+
+            <div className="mt-4 border-t border-white/10 pt-4">
+                <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                        <p className="truncate text-xs font-medium text-white/80">
+                            {isAvatarActive
+                                ? selectedAvatar?.name ??
+                                  "Avatar"
+                                : "Camera mode"}
+                        </p>
+
+                        <p className="mt-0.5 text-[11px] text-white/40">
+                            {isAvatarActive
+                                ? "Remote participant sees your avatar."
+                                : "Remote participant sees your camera."}
+                        </p>
+                    </div>
+
+                    <div className="flex shrink-0 gap-2">
+                        <button
+                            type="button"
+                            disabled={
+                                disabled ||
+                                !selectedAvatar
+                            }
+                            onClick={onUseAvatar}
+                            className={[
+                                "inline-flex h-10 items-center gap-2 rounded-full px-4 text-xs font-semibold transition",
+                                "border",
+                                disabled ||
+                                !selectedAvatar
+                                    ? "cursor-not-allowed border-white/10 bg-white/5 text-white/30"
+                                    : "border-violet-300/20 bg-violet-500/20 text-violet-100 hover:bg-violet-500/30",
+                            ].join(" ")}
+                        >
+                            {isAvatarActive && (
+                                <CheckIcon />
+                            )}
+
+                            Use avatar
+                        </button>
+
+                        <button
+                            type="button"
+                            disabled={
+                                disabled ||
+                                !isAvatarActive
+                            }
+                            onClick={onUseCamera}
+                            className={[
+                                "inline-flex h-10 items-center rounded-full border px-4 text-xs font-semibold transition",
+                                disabled ||
+                                !isAvatarActive
+                                    ? "cursor-not-allowed border-white/10 bg-white/5 text-white/30"
+                                    : "border-white/10 bg-white/10 text-white hover:bg-white/15",
+                            ].join(" ")}
+                        >
+                            Use camera
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function EndedCallView({
     profile,
     type,
@@ -437,6 +610,9 @@ export function CallOverlay() {
     const [isSpeakerEnabled, setIsSpeakerEnabled] =
         useState(true);
 
+    const [isAvatarPickerOpen, setIsAvatarPickerOpen] =
+        useState(false);
+
     const enabled =
         Boolean(activeCall) &&
         !isTerminal &&
@@ -475,27 +651,24 @@ export function CallOverlay() {
         },
     });
 
-    const avatar = useMemo<AvatarDefinition>(
-        () => ({
-            id: "default-avatar",
-            name: "Default Avatar",
-            type: AVATAR_TYPE.VRM,
-            renderMode: AVATAR_RENDER_MODE.VRM,
-            thumbnailUrl: "",
-            assetUrl:
-                process.env
-                    .NEXT_PUBLIC_MIYOR_AVATAR_MODEL_URL ??
-                "/avatars/default-avatar.vrm",
-            enabled: true,
-            capabilities: {
-                headTracking: true,
-                eyeTracking: true,
-                mouthTracking: true,
-                facialExpressions: true,
-            },
-        }),
-        [],
-    );
+    /*
+     * Avatar selection is intentionally independent from
+     * avatar activation.
+     *
+     * This means the user can select another avatar while
+     * the current avatar remains live on the call.
+     *
+     * AvatarCanvas keeps the same canvas and capture stream;
+     * AvatarEngine swaps only the renderer/model.
+     */
+    const {
+        avatars,
+        selectedAvatar,
+        selectAvatar,
+    } = useAvatarSelection({
+        initialAvatarId:
+            "default-vrm",
+    });
 
     const {
         avatarVideoTrack,
@@ -511,7 +684,8 @@ export function CallOverlay() {
             isAccepted &&
             isConnected &&
             isCameraEnabled,
-        videoSenderReady: isVideoSenderReady,
+        videoSenderReady:
+            isVideoSenderReady,
         replaceVideoTrack,
     });
 
@@ -543,7 +717,8 @@ export function CallOverlay() {
                 !isVideoCall ||
                 !isConnected ||
                 !isCameraEnabled ||
-                !avatarVideoTrack
+                !avatarVideoTrack ||
+                !selectedAvatar
             ) {
                 return;
             }
@@ -562,7 +737,85 @@ export function CallOverlay() {
             isCameraEnabled,
             isConnected,
             isVideoCall,
+            selectedAvatar,
             toggleAvatar,
+        ]);
+
+    const handleSelectAvatar =
+        useCallback(
+            (avatar: AvatarDefinition) => {
+                selectAvatar(avatar);
+
+                /*
+                 * Do not disable avatar mode here.
+                 *
+                 * AvatarCanvas receives the new definition and
+                 * AvatarEngine replaces the renderer on the same
+                 * canvas. The existing captured MediaStreamTrack
+                 * therefore remains alive and WebRTC does not
+                 * renegotiate.
+                 */
+            },
+            [selectAvatar],
+        );
+
+    const handleUseAvatar =
+        useCallback(async () => {
+            if (
+                !selectedAvatar ||
+                !isVideoCall ||
+                !isConnected ||
+                !isCameraEnabled ||
+                !avatarVideoTrack
+            ) {
+                return;
+            }
+
+            try {
+                if (!isAvatarActive) {
+                    await toggleAvatar();
+                }
+
+                setIsAvatarPickerOpen(
+                    false,
+                );
+            } catch {
+                /*
+                 * Error state is owned by useAvatarMedia.
+                 */
+            }
+        }, [
+            avatarVideoTrack,
+            isAvatarActive,
+            isCameraEnabled,
+            isConnected,
+            isVideoCall,
+            selectedAvatar,
+            toggleAvatar,
+        ]);
+
+    const handleUseCamera =
+        useCallback(async () => {
+            if (!isAvatarActive) {
+                setIsAvatarPickerOpen(
+                    false,
+                );
+                return;
+            }
+
+            try {
+                await disableAvatar();
+                setIsAvatarPickerOpen(
+                    false,
+                );
+            } catch {
+                /*
+                 * Keep the picker open if restoration fails.
+                 */
+            }
+        }, [
+            disableAvatar,
+            isAvatarActive,
         ]);
 
     const toggleSpeaker =
@@ -751,6 +1004,26 @@ export function CallOverlay() {
         isVideoCall,
     ]);
 
+    /*
+     * Close the picker automatically if avatar mode can
+     * no longer be used.
+     */
+    useEffect(() => {
+        if (
+            !isVideoCall ||
+            !isConnected ||
+            !isCameraEnabled
+        ) {
+            setIsAvatarPickerOpen(
+                false,
+            );
+        }
+    }, [
+        isCameraEnabled,
+        isConnected,
+        isVideoCall,
+    ]);
+
     if (!activeCall) {
         return null;
     }
@@ -843,10 +1116,15 @@ export function CallOverlay() {
                                     : "h-36 w-28 sm:h-48 sm:w-36",
                             ].join(" ")}
                         >
-                            {isAvatarActive ? (
+                            {isAvatarActive &&
+                            selectedAvatar ? (
                                 <AvatarPreview
-                                    cameraStream={localStream}
-                                    avatar={avatar}
+                                    cameraStream={
+                                        localStream
+                                    }
+                                    avatar={
+                                        selectedAvatar
+                                    }
                                     trackingEnabled
                                     active
                                     onAvatarCanvasReady={
@@ -875,7 +1153,10 @@ export function CallOverlay() {
 
                             <span className="absolute bottom-2 left-2 rounded-full bg-black/50 px-2.5 py-1 text-[10px] font-medium text-white/75 backdrop-blur">
                                 {isAvatarActive
-                                    ? "You · Avatar"
+                                    ? `You · ${
+                                          selectedAvatar?.name ??
+                                          "Avatar"
+                                      }`
                                     : "You"}
                             </span>
 
@@ -980,7 +1261,40 @@ export function CallOverlay() {
 
                 <footer className="px-5 pb-8 sm:px-8">
                     {localStream && (
-                        <div className="mb-5 flex items-center justify-center gap-3">
+                        <div className="relative mb-5 flex items-center justify-center gap-3">
+                            {isAvatarPickerOpen &&
+                                isVideo && (
+                                    <AvatarPicker
+                                        avatars={
+                                            avatars
+                                        }
+                                        selectedAvatar={
+                                            selectedAvatar
+                                        }
+                                        isAvatarActive={
+                                            isAvatarActive
+                                        }
+                                        disabled={
+                                            !isConnected ||
+                                            !isCameraEnabled
+                                        }
+                                        onSelect={
+                                            handleSelectAvatar
+                                        }
+                                        onUseAvatar={
+                                            handleUseAvatar
+                                        }
+                                        onUseCamera={
+                                            handleUseCamera
+                                        }
+                                        onClose={() =>
+                                            setIsAvatarPickerOpen(
+                                                false,
+                                            )
+                                        }
+                                    />
+                                )}
+
                             <MediaButton
                                 active={!isMuted}
                                 label={
@@ -1116,12 +1430,17 @@ export function CallOverlay() {
                                             )
                                         }
                                         label={
-                                            isAvatarActive
-                                                ? "Turn avatar off"
-                                                : "Turn avatar on"
+                                            isAvatarPickerOpen
+                                                ? "Close avatar picker"
+                                                : "Choose avatar"
                                         }
                                         onClick={() =>
-                                            void handleAvatarToggle()
+                                            setIsAvatarPickerOpen(
+                                                (
+                                                    current,
+                                                ) =>
+                                                    !current,
+                                            )
                                         }
                                     >
                                         <AvatarIcon />

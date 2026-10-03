@@ -29,7 +29,16 @@ import {
 
 type AvatarCanvasProps = {
     avatar: AvatarDefinition;
-    tracking: AvatarTrackingState;
+
+    /*
+     * This is the live tracking state.
+     *
+     * IMPORTANT:
+     * We intentionally do not copy this into React state.
+     * The render loop reads trackingRef.current directly.
+     */
+    trackingRef: React.MutableRefObject<AvatarTrackingState>;
+
     onCanvasReady?: (
         canvas: HTMLCanvasElement,
     ) => void;
@@ -37,7 +46,7 @@ type AvatarCanvasProps = {
 
 export function AvatarCanvas({
     avatar,
-    tracking,
+    trackingRef,
     onCanvasReady,
 }: AvatarCanvasProps) {
     const containerRef =
@@ -48,11 +57,6 @@ export function AvatarCanvas({
 
     const engineRef =
         useRef<AvatarEngine | null>(null);
-
-    const trackingRef =
-        useRef<AvatarTrackingState>(
-            tracking,
-        );
 
     const avatarRef =
         useRef<AvatarDefinition>(
@@ -66,18 +70,8 @@ export function AvatarCanvas({
         useRef(false);
 
     /*
-     * Keep the latest tracking state available to
-     * the animation loop without recreating the loop
-     * on every tracking update.
-     */
-    useEffect(() => {
-        trackingRef.current =
-            tracking;
-    }, [tracking]);
-
-    /*
-     * Keep the latest avatar available to asynchronous
-     * initialization and avatar-switch operations.
+     * Keep the latest avatar available to
+     * asynchronous renderer operations.
      */
     useEffect(() => {
         avatarRef.current =
@@ -95,8 +89,10 @@ export function AvatarCanvas({
 
     /*
      * Create the canvas, AvatarEngine, renderer factory,
-     * resize observer, and render loop once for this
-     * component instance.
+     * resize observer, and continuous render loop.
+     *
+     * This lifecycle intentionally does NOT depend on
+     * trackingRef or tracking state.
      */
     useEffect(() => {
         const container =
@@ -107,6 +103,12 @@ export function AvatarCanvas({
         }
 
         let disposed = false;
+
+        /*
+         * --------------------------------------------------
+         * CANVAS
+         * --------------------------------------------------
+         */
 
         const canvas =
             document.createElement(
@@ -128,13 +130,21 @@ export function AvatarCanvas({
             canvas,
         );
 
+        /*
+         * --------------------------------------------------
+         * AVATAR ENGINE
+         * --------------------------------------------------
+         */
+
         const engine =
             new AvatarEngine(
                 (
                     selectedAvatar,
                     rendererCanvas,
                 ) => {
-                    switch (selectedAvatar.type) {
+                    switch (
+                        selectedAvatar.type
+                    ) {
                         case AVATAR_TYPE.VRM:
                             return new VRMRenderer(
                                 rendererCanvas,
@@ -169,6 +179,12 @@ export function AvatarCanvas({
 
         engineRef.current =
             engine;
+
+        /*
+         * --------------------------------------------------
+         * RESIZE
+         * --------------------------------------------------
+         */
 
         const resize =
             () => {
@@ -205,6 +221,28 @@ export function AvatarCanvas({
 
         resize();
 
+        /*
+         * --------------------------------------------------
+         * CONTINUOUS RENDER LOOP
+         * --------------------------------------------------
+         *
+         * IMPORTANT:
+         *
+         * MediaPipe does NOT control this loop.
+         *
+         * The camera/tracker can update trackingRef at
+         * ~30 FPS while this loop continues rendering at
+         * the browser's display refresh rate.
+         *
+         * Example:
+         *
+         * Camera          60 FPS
+         * MediaPipe       ~30 FPS
+         * Avatar render    60 FPS
+         *
+         * The latest tracking values are always consumed.
+         */
+
         let animationFrame =
             0;
 
@@ -214,8 +252,11 @@ export function AvatarCanvas({
                     return;
                 }
 
+                const currentTracking =
+                    trackingRef.current;
+
                 engine.update(
-                    trackingRef.current,
+                    currentTracking,
                 );
 
                 animationFrame =
@@ -230,12 +271,11 @@ export function AvatarCanvas({
             );
 
         /*
-         * Load the initial avatar.
-         *
-         * The canvas is not exposed to the media layer
-         * until the initial renderer has successfully
-         * loaded.
+         * --------------------------------------------------
+         * INITIAL AVATAR
+         * --------------------------------------------------
          */
+
         const initialAvatar =
             avatarRef.current;
 
@@ -259,12 +299,10 @@ export function AvatarCanvas({
                 );
 
                 /*
-                 * The selected avatar may have changed
-                 * while the initial avatar was loading.
+                 * The user may have selected a different
+                 * avatar while the first avatar was loading.
                  *
-                 * If so, immediately load the latest
-                 * selection rather than leaving the
-                 * original avatar active.
+                 * Make sure the newest selection wins.
                  */
                 const latestAvatar =
                     avatarRef.current;
@@ -279,7 +317,9 @@ export function AvatarCanvas({
                             canvas,
                         )
                         .then(() => {
-                            if (disposed) {
+                            if (
+                                disposed
+                            ) {
                                 return;
                             }
 
@@ -289,28 +329,42 @@ export function AvatarCanvas({
                                 canvas,
                             );
                         })
-                        .catch((error) => {
-                            if (disposed) {
-                                return;
-                            }
-
-                            console.error(
-                                "[Avatar] Failed to load latest avatar:",
+                        .catch(
+                            (
                                 error,
-                            );
-                        });
+                            ) => {
+                                if (
+                                    disposed
+                                ) {
+                                    return;
+                                }
+
+                                console.error(
+                                    "[Avatar] Failed to load latest avatar:",
+                                    error,
+                                );
+                            },
+                        );
                 }
             })
-            .catch((error) => {
-                if (disposed) {
-                    return;
-                }
+            .catch(
+                (error) => {
+                    if (disposed) {
+                        return;
+                    }
 
-                console.error(
-                    "[Avatar] Failed to load avatar:",
-                    error,
-                );
-            });
+                    console.error(
+                        "[Avatar] Failed to load avatar:",
+                        error,
+                    );
+                },
+            );
+
+        /*
+         * --------------------------------------------------
+         * CLEANUP
+         * --------------------------------------------------
+         */
 
         return () => {
             disposed = true;
@@ -346,20 +400,22 @@ export function AvatarCanvas({
                     null;
             }
         };
-    }, []);
+    }, [trackingRef]);
 
     /*
-     * Avatar selection changes the active renderer
-     * without recreating:
+     * ------------------------------------------------------
+     * AVATAR SWITCHING
+     * ------------------------------------------------------
+     *
+     * Changing avatars does not recreate:
      *
      * - the canvas
-     * - AvatarEngine
+     * - the animation loop
      * - MediaPipe
+     * - the camera
      * - WebRTC
      *
-     * The initial avatar is handled by the mount
-     * effect above. This effect handles subsequent
-     * avatar changes only.
+     * Only the renderer/model changes.
      */
     useEffect(() => {
         if (
@@ -412,25 +468,22 @@ export function AvatarCanvas({
                     ),
                 );
 
-                /*
-                 * The canvas itself has not changed.
-                 * Notify consumers again because the
-                 * renderer backing the canvas has changed.
-                 */
                 onCanvasReadyRef.current?.(
                     canvas,
                 );
             })
-            .catch((error) => {
-                if (cancelled) {
-                    return;
-                }
+            .catch(
+                (error) => {
+                    if (cancelled) {
+                        return;
+                    }
 
-                console.error(
-                    "[Avatar] Failed to switch avatar:",
-                    error,
-                );
-            });
+                    console.error(
+                        "[Avatar] Failed to switch avatar:",
+                        error,
+                    );
+                },
+            );
 
         return () => {
             cancelled = true;
