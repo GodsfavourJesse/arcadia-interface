@@ -216,6 +216,12 @@ export function useAvatarMedia({
                     stream.getVideoTracks()[0] ??
                     null;
 
+                console.log("[Avatar] Canvas capture stream created", {
+                    trackId: videoTrack?.id,
+                    readyState: videoTrack?.readyState,
+                    kind: videoTrack?.kind,
+                });
+
                 if (!videoTrack) {
                     stream
                         .getTracks()

@@ -647,6 +647,13 @@ export function useWebRTC({
                     sender,
                     nextTrack,
                 );
+
+                console.log("[WebRTC] Replacing video sender track", {
+                    previousTrackId: sender.track?.id ?? null,
+                    previousReadyState: sender.track?.readyState ?? null,
+                    nextTrackId: nextTrack?.id ?? null,
+                    nextReadyState: nextTrack?.readyState ?? null,
+                });
             },
             [],
         );
@@ -912,6 +919,14 @@ export function useWebRTC({
 
             peer.ontrack =
                 (event) => {
+                    console.log("[WebRTC] Remote track received", {
+                        kind: event.track.kind,
+                        id: event.track.id,
+                        readyState: event.track.readyState,
+                        streams: event.streams.map(
+                            (stream) => stream.id,
+                        ),
+                    });
                     /*
                      * Always use the actual incoming
                      * WebRTC track. Never use the
@@ -1326,8 +1341,18 @@ export function useWebRTC({
                     true;
 
                 try {
-                    const offer =
-                        await peer.createOffer();
+                    const videoSender =
+                        peer.getSenders().find(
+                            (sender) => sender.track?.kind === "video",
+                        );
+
+                    console.log("[WebRTC] Creating offer", {
+                        videoTrackId: videoSender?.track?.id ?? null,
+                        videoTrackReadyState: videoSender?.track?.readyState ?? null,
+                    });
+
+
+                    const offer = await peer.createOffer();
 
                     await peer.setLocalDescription(
                         offer,

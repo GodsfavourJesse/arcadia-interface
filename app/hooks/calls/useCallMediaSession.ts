@@ -199,6 +199,11 @@ export function useCallMediaSession({
 
         async function startVideoSession(track: MediaStreamTrack) {
             try {
+                console.log("[CallMedia] Installing initial avatar track", {
+                    trackId: track.id,
+                    readyState: track.readyState,
+                    kind: track.kind,
+                });
                 /*
                  * Install the avatar track BEFORE creating the SDP
                  * offer.
@@ -208,9 +213,21 @@ export function useCallMediaSession({
                  */
                 await replaceVideoTrackRef.current(track);
 
+                console.log("[CallMedia] Installing initial avatar track", {
+                    trackId: track.id,
+                    readyState: track.readyState,
+                    kind: track.kind,
+                });
+
                 if (isStale()) {
                     return;
                 }
+
+                console.log("[CallMedia] Installing initial avatar track", {
+                    trackId: track.id,
+                    readyState: track.readyState,
+                    kind: track.kind,
+                });
 
                 /*
                  * Now that the sender contains the avatar track,
