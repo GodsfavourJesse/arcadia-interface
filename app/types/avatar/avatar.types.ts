@@ -109,14 +109,11 @@ export type AvatarLandmark = {
 };
 
 
-/**
- * Per-side eyebrow expression state derived from MediaPipe blendshapes.
- */
 export type AvatarBrowState = {
-    leftInnerUp: number;
-    rightInnerUp: number;
-    leftOuterUp: number;
-    rightOuterUp: number;
+    leftInner: number;
+    rightInner: number;
+    leftOuter: number;
+    rightOuter: number;
     leftDown: number;
     rightDown: number;
 };

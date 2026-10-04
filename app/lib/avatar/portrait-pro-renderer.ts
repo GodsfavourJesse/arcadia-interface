@@ -79,7 +79,6 @@ export type PortraitProOptions = {
  * - brow retargeting
  * - mouth/jaw retargeting
  * - feathered face masking
- * - live-camera background compositing
  * - local portrait enhancement
  *
  * It intentionally remains a renderer, so WebRTC never receives raw
@@ -95,18 +94,10 @@ export class PortraitProRenderer implements AvatarRenderer {
     private readonly options: Required<PortraitProOptions>;
 
     private image: HTMLImageElement | null = null;
-
-    /**
-     * Local physical camera source. The final canvas becomes the
-     * outgoing WebRTC video track, so the remote peer receives the
-     * composited face-swap result rather than the raw camera track.
-     */
-    private cameraSource: HTMLVideoElement | null = null;
-
     private sourceSurface: HTMLCanvasElement | null = null;
-    private backgroundSurface: HTMLCanvasElement | null = null;
     private sourceLandmarks: readonly PuppetLandmark[] = [];
     private triangles: readonly Triangle[] = [];
+    private neutralDriverLandmarks: readonly PuppetLandmark[] = [];
 
     private faceLayer: HTMLCanvasElement | null = null;
     private maskLayer: HTMLCanvasElement | null = null;
@@ -138,7 +129,7 @@ export class PortraitProRenderer implements AvatarRenderer {
         };
 
         const context = canvas.getContext("2d", {
-            alpha: false,
+            alpha: true,
             desynchronized: true,
         });
 
@@ -176,9 +167,9 @@ export class PortraitProRenderer implements AvatarRenderer {
             image,
             this.options.enhancement,
         );
-        this.backgroundSurface = null;
         this.sourceLandmarks = [];
         this.triangles = [];
+        this.neutralDriverLandmarks = [];
         this.resetCalibration();
 
         this.ensureLayers();
@@ -208,11 +199,6 @@ export class PortraitProRenderer implements AvatarRenderer {
                 );
             }
 
-            this.backgroundSurface =
-                createPortraitBackgroundSurface(
-                    this.sourceSurface,
-                    this.sourceLandmarks,
-                );
 
             console.info("[Miyor Portrait Pro] Source portrait calibrated", {
                 landmarks: this.sourceLandmarks.length,
@@ -227,21 +213,7 @@ export class PortraitProRenderer implements AvatarRenderer {
             await this.fallback.load(avatar);
         }
 
-        if (!this.backgroundSurface && this.sourceSurface) {
-            this.backgroundSurface =
-                createPortraitBackgroundSurface(
-                    this.sourceSurface,
-                    this.sourceLandmarks,
-                );
-        }
-
         this.renderStatic();
-    }
-
-    setCameraSource(
-        video: HTMLVideoElement | null,
-    ): void {
-        this.cameraSource = video;
     }
 
     update(tracking: AvatarTrackingState): void {
@@ -303,11 +275,10 @@ export class PortraitProRenderer implements AvatarRenderer {
         this.disposed = true;
 
         this.image = null;
-        this.cameraSource = null;
         this.sourceSurface = null;
-        this.backgroundSurface = null;
         this.sourceLandmarks = [];
         this.triangles = [];
+        this.neutralDriverLandmarks = [];
 
         this.faceLayer = null;
         this.maskLayer = null;
@@ -383,6 +354,28 @@ export class PortraitProRenderer implements AvatarRenderer {
             (tracking.head.roll - this.calibration.roll) *
             weight;
 
+        if (tracking.landmarks.length === this.sourceLandmarks.length) {
+            if (this.neutralDriverLandmarks.length !== tracking.landmarks.length) {
+                this.neutralDriverLandmarks = tracking.landmarks.map((landmark) => ({
+                    x: landmark.x,
+                    y: landmark.y,
+                    z: landmark.z,
+                }));
+            } else {
+                this.neutralDriverLandmarks = this.neutralDriverLandmarks.map(
+                    (landmark, index) => {
+                        const current = tracking.landmarks[index];
+                        if (!current) return landmark;
+                        return {
+                            x: landmark.x + (current.x - landmark.x) * weight,
+                            y: landmark.y + (current.y - landmark.y) * weight,
+                            z: landmark.z + (current.z - landmark.z) * weight,
+                        };
+                    },
+                );
+            }
+        }
+
         this.calibration.samples = count;
 
         if (count >= this.options.calibrationFrames) {
@@ -403,45 +396,99 @@ export class PortraitProRenderer implements AvatarRenderer {
     }
 
     private renderStatic(): void {
-        if (this.disposed) {
+        const surface = this.sourceSurface;
+
+        if (!surface || this.disposed) {
             return;
         }
 
-        this.context.save();
-        this.context.setTransform(1, 0, 0, 1, 0, 0);
-        this.context.clearRect(
-            0,
-            0,
+        this.ensureLayers();
+
+        const faceLayer = this.faceLayer;
+        const maskLayer = this.maskLayer;
+
+        if (!faceLayer || !maskLayer) {
+            return;
+        }
+
+        const sourceBounds = getBounds(this.sourceLandmarks);
+        const sourceWidth = Math.max(
+            sourceBounds.maxX - sourceBounds.minX,
+            0.001,
+        );
+        const sourceHeight = Math.max(
+            sourceBounds.maxY - sourceBounds.minY,
+            0.001,
+        );
+
+        const faceWidth = Math.min(this.width * 0.72, this.height * 0.78);
+        const faceHeight = faceWidth * (sourceHeight / sourceWidth);
+        const centerX = this.width * 0.5;
+        const centerY = this.height * 0.48;
+
+        const mapSource = (landmark: PuppetLandmark): Point => ({
+            x: centerX +
+                (((landmark.x - sourceBounds.minX) / sourceWidth) - 0.5) *
+                    faceWidth,
+            y: centerY +
+                (((landmark.y - sourceBounds.minY) / sourceHeight) - 0.5) *
+                    faceHeight,
+        });
+
+        const sourceToImage = (landmark: PuppetLandmark): Point => ({
+            x: landmark.x * surface.width,
+            y: landmark.y * surface.height,
+        });
+
+        faceLayer.width = this.width;
+        faceLayer.height = this.height;
+        maskLayer.width = this.width;
+        maskLayer.height = this.height;
+
+        const faceContext = faceLayer.getContext('2d', { alpha: true, desynchronized: true });
+        const maskContext = maskLayer.getContext('2d', { alpha: true });
+
+        if (!faceContext || !maskContext) {
+            return;
+        }
+
+        faceContext.clearRect(0, 0, this.width, this.height);
+        maskContext.clearRect(0, 0, this.width, this.height);
+
+        for (const [a, b, c] of this.triangles) {
+            const sourceA = this.sourceLandmarks[a];
+            const sourceB = this.sourceLandmarks[b];
+            const sourceC = this.sourceLandmarks[c];
+            if (!sourceA || !sourceB || !sourceC) continue;
+
+            drawImageTriangle(
+                faceContext,
+                surface,
+                sourceToImage(sourceA),
+                sourceToImage(sourceB),
+                sourceToImage(sourceC),
+                mapSource(sourceA),
+                mapSource(sourceB),
+                mapSource(sourceC),
+            );
+        }
+
+        drawFaceOnlyMask(
+            maskContext,
+            FACE_OVAL,
+            this.sourceLandmarks,
+            mapSource,
             this.width,
             this.height,
         );
 
-        /*
-         * Keep the outgoing surface representative of the live scene
-         * even before a face is detected. Once tracking is available,
-         * renderPortrait() replaces only the face region.
-         */
-        if (this.drawLiveCameraBackground()) {
-            this.context.restore();
-            return;
-        }
+        faceContext.save();
+        faceContext.globalCompositeOperation = 'destination-in';
+        faceContext.drawImage(maskLayer, 0, 0);
+        faceContext.restore();
 
-        const surface =
-            this.backgroundSurface ??
-            this.sourceSurface;
-
-        if (surface) {
-            drawCover(
-                this.context,
-                surface,
-                surface.width,
-                surface.height,
-                this.width,
-                this.height,
-            );
-        }
-
-        this.context.restore();
+        this.context.clearRect(0, 0, this.width, this.height);
+        this.context.drawImage(faceLayer, 0, 0);
     }
 
     private renderPortrait(
@@ -484,39 +531,7 @@ export class PortraitProRenderer implements AvatarRenderer {
             0.001,
         );
 
-        const sourceCenter = {
-            x:
-                (sourceBounds.minX +
-                    sourceBounds.maxX) *
-                0.5,
-            y:
-                (sourceBounds.minY +
-                    sourceBounds.maxY) *
-                0.5,
-        };
-
-        const liveCenter = {
-            x:
-                (liveBounds.minX +
-                    liveBounds.maxX) *
-                0.5,
-            y:
-                (liveBounds.minY +
-                    liveBounds.maxY) *
-                0.5,
-        };
-
         const neutral = this.calibration;
-
-        const faceMotionX =
-            (tracking.face.x -
-                neutral.x) *
-            this.options.motionGain;
-
-        const faceMotionY =
-            (tracking.face.y -
-                neutral.y) *
-            this.options.motionGain;
 
         const scaleMotion =
             clamp(
@@ -554,99 +569,70 @@ export class PortraitProRenderer implements AvatarRenderer {
 
         const centerX =
             this.width * 0.5 +
-            faceMotionX *
+            (tracking.face.x - neutral.x) *
                 this.width *
-                0.75 +
-            yawDelta *
-                this.width *
-                0.055;
+                0.75;
 
         const centerY =
             this.height * 0.48 -
-            faceMotionY *
+            (tracking.face.y - neutral.y) *
                 this.height *
-                0.65 +
-            pitchDelta *
-                this.height *
-                0.035;
+                0.65;
 
-        const poseScaleX =
-            1 -
-            Math.min(
-                0.16,
-                Math.abs(yawDelta) * 0.09,
-            );
+        const neutralLandmarks = this.neutralDriverLandmarks;
 
-        const poseScaleY =
-            1 -
-            Math.min(
-                0.08,
-                Math.abs(pitchDelta) * 0.05,
-            );
-
-        const mapLiveToCanvas = (
-            landmark: PuppetLandmark,
+        const mapAvatarLandmark = (
+            sourceLandmark: PuppetLandmark,
+            index: number,
         ): Point => {
-            const u =
-                (landmark.x - liveBounds.minX) /
-                liveWidth;
+            const neutralLandmark = neutralLandmarks[index];
 
-            const v =
-                (landmark.y - liveBounds.minY) /
-                liveHeight;
+            const sourceU =
+                (sourceLandmark.x - sourceBounds.minX) / sourceWidth;
+            const sourceV =
+                (sourceLandmark.y - sourceBounds.minY) / sourceHeight;
 
             let x =
                 centerX +
-                (u - 0.5) *
-                    targetFaceWidth *
-                    poseScaleX;
-
+                (sourceU - 0.5) * targetFaceWidth;
             let y =
                 centerY +
-                (v - 0.5) *
-                    targetFaceHeight *
-                    poseScaleY;
+                (sourceV - 0.5) * targetFaceHeight;
+
+            if (neutralLandmark && tracking.landmarks[index]) {
+                const current = tracking.landmarks[index];
+                const deltaX = current.x - neutralLandmark.x;
+                const deltaY = current.y - neutralLandmark.y;
+
+                // Convert driver-face normalized motion into the avatar's
+                // calibrated face space. This preserves the uploaded person's
+                // own eyes, nose, mouth and proportions instead of replacing
+                // them with the camera user's geometry.
+                x += deltaX * (targetFaceWidth / liveWidth) * this.options.motionGain;
+                y += deltaY * (targetFaceHeight / liveHeight) * this.options.motionGain;
+            }
 
             const dx = x - centerX;
             const dy = y - centerY;
-            const cos = Math.cos(rollDelta * 0.15);
-            const sin = Math.sin(rollDelta * 0.15);
+            const yawParallax =
+                yawDelta * this.width * 0.045 * (0.55 + Math.abs(sourceU - 0.5));
+            const pitchParallax =
+                pitchDelta * this.height * 0.025 * (0.55 + Math.abs(sourceV - 0.5));
 
-            x =
-                centerX +
-                dx * cos -
-                dy * sin;
-            y =
-                centerY +
-                dx * sin +
-                dy * cos;
+            const cos = Math.cos(rollDelta * 0.16);
+            const sin = Math.sin(rollDelta * 0.16);
 
             return {
-                x,
-                y,
+                x: centerX + dx * cos - dy * sin + yawParallax,
+                y: centerY + dx * sin + dy * cos + pitchParallax,
             };
         };
-
-        const sourceToImage = (
-            landmark: PuppetLandmark,
-        ): Point => ({
-            x:
-                landmark.x *
-                surface.width,
-            y:
-                landmark.y *
-                surface.height,
-        });
 
         const destination = (
             index: number,
         ): Point | null => {
-            const landmark =
-                tracking.landmarks[index];
-
-            return landmark
-                ? mapLiveToCanvas(landmark)
-                : null;
+            const landmark = this.sourceLandmarks[index];
+            return landmark ? mapAvatarLandmark(landmark, index) : null;
         };
 
         faceLayer.width = this.width;
@@ -709,12 +695,20 @@ export class PortraitProRenderer implements AvatarRenderer {
                 continue;
             }
 
-            const sourcePointA =
-                sourceToImage(sourceA);
-            const sourcePointB =
-                sourceToImage(sourceB);
-            const sourcePointC =
-                sourceToImage(sourceC);
+            const sourcePointA = {
+                x: sourceA.x * surface.width,
+                y: sourceA.y * surface.height,
+            };
+
+            const sourcePointB = {
+                x: sourceB.x * surface.width,
+                y: sourceB.y * surface.height,
+            };
+
+            const sourcePointC = {
+                x: sourceC.x * surface.width,
+                y: sourceC.y * surface.height,
+            };
 
             drawImageTriangle(
                 faceContext,
@@ -762,26 +756,16 @@ export class PortraitProRenderer implements AvatarRenderer {
             this.height,
         );
 
-        if (!this.drawLiveCameraBackground()) {
-            const background =
-                this.backgroundSurface ??
-                surface;
+        // The avatar canvas must contain only the selected avatar face.
+        // Never composite the user's camera frame or the full source portrait
+        // behind it. The camera is used only as a local motion driver.
+        this.context.clearRect(
+            0,
+            0,
+            this.width,
+            this.height,
+        );
 
-            drawCover(
-                this.context,
-                background,
-                background.width,
-                background.height,
-                this.width,
-                this.height,
-            );
-        }
-
-        /*
-         * The warped source portrait is clipped to the live face oval.
-         * The user's real body/background therefore remain visible while
-         * the selected portrait replaces the camera face.
-         */
         this.context.drawImage(
             faceLayer,
             0,
@@ -789,31 +773,6 @@ export class PortraitProRenderer implements AvatarRenderer {
         );
 
         this.context.restore();
-    }
-
-    private drawLiveCameraBackground(): boolean {
-        const video = this.cameraSource;
-
-        if (
-            !video ||
-            video.readyState <
-                HTMLMediaElement.HAVE_CURRENT_DATA ||
-            video.videoWidth <= 0 ||
-            video.videoHeight <= 0
-        ) {
-            return false;
-        }
-
-        drawCover(
-            this.context,
-            video,
-            video.videoWidth,
-            video.videoHeight,
-            this.width,
-            this.height,
-        );
-
-        return true;
     }
 
     private drawExpressionRetargeting(
@@ -1005,11 +964,101 @@ export class PortraitProRenderer implements AvatarRenderer {
             context.restore();
         }
 
+        this.drawTeeth(
+            context,
+            tracking,
+            destination,
+        );
+
         this.drawBrows(
             context,
             tracking,
             destination,
         );
+    }
+
+    private drawTeeth(
+        context: CanvasRenderingContext2D,
+        tracking: AvatarTrackingState,
+        destination: (index: number) => Point | null,
+    ): void {
+        if (tracking.mouth.open < 0.16) {
+            return;
+        }
+
+        const points = MOUTH
+            .map(destination)
+            .filter((point): point is Point => Boolean(point));
+
+        if (points.length < 8) {
+            return;
+        }
+
+        const bounds = pointsBounds(points);
+        const cx = (bounds.minX + bounds.maxX) * 0.5;
+        const mouthWidth = Math.max(4, (bounds.maxX - bounds.minX) *
+            (0.58 + tracking.mouth.smile * 0.22));
+        const mouthHeight = Math.max(2, (bounds.maxY - bounds.minY) *
+            clamp(0.34 + tracking.mouth.open * 0.58, 0.34, 0.92));
+        const top = (bounds.minY + bounds.maxY) * 0.5 - mouthHeight * 0.38;
+
+        context.save();
+        context.beginPath();
+        context.ellipse(
+            cx,
+            top + mouthHeight * 0.34,
+            mouthWidth * 0.5,
+            mouthHeight * 0.42,
+            0,
+            0,
+            Math.PI * 2,
+        );
+        context.clip();
+
+        // A restrained synthetic dental layer is used when the source image
+        // does not expose enough visible teeth. It follows the live mouth
+        // opening and smile width instead of replacing the source person's
+        // lips.
+        const teethTop = top + mouthHeight * 0.08;
+        const teethHeight = Math.max(1.5, mouthHeight * 0.34);
+        const teethWidth = mouthWidth * 0.82;
+
+        const gradient = context.createLinearGradient(
+            0, teethTop, 0, teethTop + teethHeight,
+        );
+        gradient.addColorStop(0, 'rgba(255,255,250,0.98)');
+        gradient.addColorStop(0.65, 'rgba(247,246,238,0.96)');
+        gradient.addColorStop(1, 'rgba(226,224,214,0.78)');
+
+        context.globalAlpha = clamp(
+            0.52 + tracking.mouth.open * 0.45,
+            0.52,
+            0.94,
+        );
+        context.fillStyle = gradient;
+        context.beginPath();
+        context.roundRect(
+            cx - teethWidth * 0.5,
+            teethTop,
+            teethWidth,
+            teethHeight,
+            Math.min(2, teethHeight * 0.25),
+        );
+        context.fill();
+
+        context.globalAlpha = 0.16;
+        context.strokeStyle = 'rgba(120,112,98,0.75)';
+        context.lineWidth = Math.max(0.35, teethWidth * 0.006);
+        for (let i = 1; i < 8; i += 1) {
+            const x = cx - teethWidth * 0.5 +
+                (teethWidth * i) / 8;
+            context.beginPath();
+            context.moveTo(x, teethTop + teethHeight * 0.1);
+            context.lineTo(x, teethTop + teethHeight * 0.88);
+            context.stroke();
+        }
+
+        context.restore();
     }
 
     private drawBrows(
@@ -1035,8 +1084,8 @@ export class PortraitProRenderer implements AvatarRenderer {
 
         const strengthLeft =
             clamp(
-                tracking.brows.leftInnerUp * 0.45 +
-                    tracking.brows.leftOuterUp * 0.55 -
+                tracking.brows.leftInner * 0.45 +
+                    tracking.brows.leftOuter * 0.55 -
                     tracking.brows.leftDown * 0.7,
                 0,
                 1,
@@ -1044,8 +1093,8 @@ export class PortraitProRenderer implements AvatarRenderer {
 
         const strengthRight =
             clamp(
-                tracking.brows.rightInnerUp * 0.45 +
-                    tracking.brows.rightOuterUp * 0.55 -
+                tracking.brows.rightInner * 0.45 +
+                    tracking.brows.rightOuter * 0.55 -
                     tracking.brows.rightDown * 0.7,
                 0,
                 1,
@@ -1366,6 +1415,46 @@ function pointsBounds(
     return { minX, minY, maxX, maxY };
 }
 
+function drawFaceOnlyMask(
+    context: CanvasRenderingContext2D,
+    indices: readonly number[],
+    landmarks: readonly PuppetLandmark[],
+    destination: (landmark: PuppetLandmark) => Point,
+    width: number,
+    height: number,
+): void {
+    const points = indices
+        .map((index) => landmarks[index])
+        .filter((point): point is PuppetLandmark => Boolean(point))
+        .map(destination);
+
+    if (points.length < 10) {
+        return;
+    }
+
+    context.save();
+    context.clearRect(0, 0, width, height);
+    context.fillStyle = 'white';
+    context.filter = 'blur(2.5px)';
+
+    const first = points[0];
+    if (!first) {
+        context.restore();
+        return;
+    }
+
+    context.beginPath();
+    context.moveTo(first.x, first.y);
+    for (let i = 1; i < points.length; i += 1) {
+        const point = points[i];
+        if (point) context.lineTo(point.x, point.y);
+    }
+    context.closePath();
+    context.fill();
+    context.filter = 'none';
+    context.restore();
+}
+
 function drawFeatheredFaceMask(
     context: CanvasRenderingContext2D,
     indices: readonly number[],
@@ -1385,33 +1474,13 @@ function drawFeatheredFaceMask(
         return;
     }
 
-    const bounds = pointsBounds(points);
-    const centerX =
-        (bounds.minX + bounds.maxX) * 0.5;
-    const centerY =
-        (bounds.minY + bounds.maxY) * 0.5;
-    const expansion = 1.025;
-
-    const expandedPoints = points.map(
-        (point) => ({
-            x:
-                centerX +
-                (point.x - centerX) *
-                    expansion,
-            y:
-                centerY +
-                (point.y - centerY) *
-                    expansion,
-        }),
-    );
-
     context.save();
     context.clearRect(0, 0, width, height);
     context.fillStyle = "white";
     context.filter = "blur(5px)";
     context.beginPath();
 
-    const first = expandedPoints[0];
+    const first = points[0];
     if (!first) {
         context.restore();
         return;
@@ -1419,12 +1488,8 @@ function drawFeatheredFaceMask(
 
     context.moveTo(first.x, first.y);
 
-    for (
-        let i = 1;
-        i < expandedPoints.length;
-        i += 1
-    ) {
-        const point = expandedPoints[i];
+    for (let i = 1; i < points.length; i += 1) {
+        const point = points[i];
         if (!point) {
             continue;
         }
@@ -1479,115 +1544,6 @@ function clamp(
     max: number,
 ): number {
     return Math.min(max, Math.max(min, value));
-}
-
-function createPortraitBackgroundSurface(
-    source: HTMLCanvasElement,
-    landmarks: readonly PuppetLandmark[],
-): HTMLCanvasElement {
-    const background =
-        document.createElement("canvas");
-
-    background.width = source.width;
-    background.height = source.height;
-
-    const context =
-        background.getContext("2d", {
-            alpha: true,
-            desynchronized: true,
-        });
-
-    if (!context) {
-        throw new Error(
-            "Unable to create the portrait background surface.",
-        );
-    }
-
-    context.imageSmoothingEnabled = true;
-    context.imageSmoothingQuality = "high";
-    context.drawImage(source, 0, 0);
-
-    const mask = document.createElement("canvas");
-    mask.width = source.width;
-    mask.height = source.height;
-
-    const maskContext =
-        mask.getContext("2d");
-
-    if (!maskContext) {
-        return background;
-    }
-
-    const points = FACE_OVAL
-        .map((index) => landmarks[index])
-        .filter(
-            (point): point is PuppetLandmark =>
-                Boolean(point),
-        );
-
-    if (points.length < 10) {
-        return background;
-    }
-
-    maskContext.fillStyle = "white";
-    maskContext.filter = "blur(24px)";
-    maskContext.beginPath();
-
-    const first = points[0];
-    if (!first) {
-        return background;
-    }
-
-    maskContext.moveTo(
-        first.x * source.width,
-        first.y * source.height,
-    );
-
-    for (let i = 1; i < points.length; i += 1) {
-        const point = points[i];
-        if (!point) {
-            continue;
-        }
-
-        maskContext.lineTo(
-            point.x * source.width,
-            point.y * source.height,
-        );
-    }
-
-    maskContext.closePath();
-    maskContext.fill();
-    maskContext.filter = "none";
-
-    const blurred =
-        document.createElement("canvas");
-    blurred.width = source.width;
-    blurred.height = source.height;
-
-    const blurredContext =
-        blurred.getContext("2d");
-
-    if (!blurredContext) {
-        return background;
-    }
-
-    blurredContext.filter = "blur(16px)";
-    blurredContext.drawImage(source, 0, 0);
-    blurredContext.filter = "none";
-
-    blurredContext.save();
-    blurredContext.globalCompositeOperation =
-        "destination-in";
-    blurredContext.drawImage(mask, 0, 0);
-    blurredContext.restore();
-
-    context.drawImage(
-        blurred,
-        0,
-        0,
-    );
-
-    return background;
 }
 
 function createEnhancedSurface(

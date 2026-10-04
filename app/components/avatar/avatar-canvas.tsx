@@ -28,12 +28,6 @@ import { PortraitProRenderer } from "@/app/lib/avatar/portrait-pro-renderer";
 type AvatarCanvasProps = {
     avatar: AvatarDefinition;
 
-    /**
-     * Local physical camera element. Portrait Pro composites this
-     * camera behind the masked portrait face.
-     */
-    cameraVideo?: HTMLVideoElement | null;
-
     /*
      * Controls whether the animation loop updates the renderer.
      * The canvas remains mounted even when false so captureStream()
@@ -57,7 +51,6 @@ type AvatarCanvasProps = {
 
 export function AvatarCanvas({
     avatar,
-    cameraVideo = null,
     renderEnabled = true,
     trackingRef,
     onCanvasReady,
@@ -99,17 +92,6 @@ export function AvatarCanvas({
         onCanvasReadyRef.current =
             onCanvasReady;
     }, [onCanvasReady]);
-
-    /*
-     * Keep the renderer connected to the same physical camera element
-     * that MediaPipe is tracking. This never sends camera frames or
-     * landmarks to the backend.
-     */
-    useEffect(() => {
-        engineRef.current?.setCameraSource(
-            cameraVideo,
-        );
-    }, [cameraVideo]);
 
     /*
      * Create the canvas, AvatarEngine, renderer factory,
@@ -208,10 +190,6 @@ export function AvatarCanvas({
 
         engineRef.current =
             engine;
-
-        engine.setCameraSource(
-            cameraVideo,
-        );
 
         /*
          * --------------------------------------------------

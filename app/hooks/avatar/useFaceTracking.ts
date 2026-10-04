@@ -277,10 +277,10 @@ function createNeutralTracking(): AvatarTrackingState {
         },
 
         brows: {
-            leftInnerUp: 0,
-            rightInnerUp: 0,
-            leftOuterUp: 0,
-            rightOuterUp: 0,
+            leftInner: 0,
+            rightInner: 0,
+            leftOuter: 0,
+            rightOuter: 0,
             leftDown: 0,
             rightDown: 0,
         },
@@ -841,10 +841,10 @@ function extractBrows(
         getBlendshapeScore(result, name);
 
     return {
-        leftInnerUp: clamp01(score("browInnerUp")),
-        rightInnerUp: clamp01(score("browInnerUp")),
-        leftOuterUp: clamp01(score("browOuterUpLeft")),
-        rightOuterUp: clamp01(score("browOuterUpRight")),
+        leftInner: clamp01(score("browInnerUp")),
+        rightInner: clamp01(score("browInnerUp")),
+        leftOuter: clamp01(score("browOuterUpLeft")),
+        rightOuter: clamp01(score("browOuterUpRight")),
         leftDown: clamp01(score("browDownLeft")),
         rightDown: clamp01(score("browDownRight")),
     };
@@ -1039,37 +1039,37 @@ function applyTrackingResult(
             deltaSeconds,
         );
 
-    current.brows.leftInnerUp =
+    current.brows.leftInner =
         smoothScalar(
             filters.browLeftInnerUp,
-            rawBrows.leftInnerUp,
+            rawBrows.leftInner,
             EXPRESSION_FAST_RESPONSE,
             EXPRESSION_FAST_RESPONSE,
             deltaSeconds,
         );
 
-    current.brows.rightInnerUp =
+    current.brows.rightInner =
         smoothScalar(
             filters.browRightInnerUp,
-            rawBrows.rightInnerUp,
+            rawBrows.rightInner,
             EXPRESSION_FAST_RESPONSE,
             EXPRESSION_FAST_RESPONSE,
             deltaSeconds,
         );
 
-    current.brows.leftOuterUp =
+    current.brows.leftOuter =
         smoothScalar(
             filters.browLeftOuterUp,
-            rawBrows.leftOuterUp,
+            rawBrows.leftOuter,
             EXPRESSION_FAST_RESPONSE,
             EXPRESSION_FAST_RESPONSE,
             deltaSeconds,
         );
 
-    current.brows.rightOuterUp =
+    current.brows.rightOuter =
         smoothScalar(
             filters.browRightOuterUp,
-            rawBrows.rightOuterUp,
+            rawBrows.rightOuter,
             EXPRESSION_FAST_RESPONSE,
             EXPRESSION_FAST_RESPONSE,
             deltaSeconds,
