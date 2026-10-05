@@ -1014,14 +1014,19 @@ export function CallOverlay() {
 
     const isVideo = activeCall.type === CALL_TYPE.VIDEO;
 
+    /*
+     * A remote avatar is a normal WebRTC video track.
+     * Do not gate rendering on the remote media-state flag or on
+     * sender-side camera state. The incoming track is authoritative.
+     */
     const hasRemoteVideo =
         isVideo &&
         Boolean(
             remoteStream
                 ?.getVideoTracks()
-                .some((track) =>
-                    track.readyState === "live" &&
-                    track.enabled,
+                .some(
+                    (track) =>
+                        track.readyState === "live",
                 ),
         );
 

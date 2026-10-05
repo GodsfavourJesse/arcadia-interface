@@ -220,6 +220,10 @@ export function useAvatarMedia({
                     trackId: videoTrack?.id,
                     readyState: videoTrack?.readyState,
                     kind: videoTrack?.kind,
+                    canvasWidth: canvas.width,
+                    canvasHeight: canvas.height,
+                    canvasClientWidth: canvas.clientWidth,
+                    canvasClientHeight: canvas.clientHeight,
                 });
 
                 if (!videoTrack) {

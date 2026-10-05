@@ -22,7 +22,7 @@ import {
 import {
     TwoDRenderer,
 } from "@/app/lib/avatar/two-d-renderer";
-import { PortraitProRenderer } from "@/app/lib/avatar/portrait-pro-renderer";
+import { StaticImageRenderer } from "@/app/lib/avatar/static-image-renderer";
 
 
 type AvatarCanvasProps = {
@@ -162,13 +162,18 @@ export function AvatarCanvas({
                             );
 
                         case AVATAR_TYPE.IMAGE:
-                            return new PortraitProRenderer(
+                            /*
+                             * Phase 1 for uploaded-photo calls:
+                             * paint the uploaded image directly into the
+                             * capture canvas. WebRTC sends these pixels.
+                             *
+                             * Do not run the portrait/face-warp renderer yet.
+                             * Once the remote image is proven end-to-end, we
+                             * can add face movement without changing the
+                             * WebRTC media contract.
+                             */
+                            return new StaticImageRenderer(
                                 rendererCanvas,
-                                {
-                                    enhancement: "studio",
-                                    calibrationFrames: 18,
-                                    motionGain: 1,
-                                },
                             );
 
                         case AVATAR_TYPE.GLTF:
