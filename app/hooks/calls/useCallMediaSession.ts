@@ -120,11 +120,13 @@ export function useCallMediaSession({
      */
     const startInitialOfferRef = useRef(startInitialOffer);
     const enableAvatarRef = useRef(enableAvatar);
+    const isAvatarActiveRef = useRef(isAvatarActive);
     const onFailedRef = useRef(onFailed);
 
     useEffect(() => {
         startInitialOfferRef.current = startInitialOffer;
         enableAvatarRef.current = enableAvatar;
+        isAvatarActiveRef.current = isAvatarActive;
         onFailedRef.current = onFailed;
     });
 
@@ -195,46 +197,41 @@ export function useCallMediaSession({
 
         async function startVideoSession(track: MediaStreamTrack) {
             try {
-                console.log("[CallMedia] Activating initial avatar video", {
+                /*
+                 * Activate the avatar BEFORE creating the SDP offer.
+                 *
+                 * enableAvatar() performs the RTCRtpSender.replaceTrack()
+                 * and marks avatar mode active as one coordinated operation.
+                 * This is important: leaving isAvatarActive=false while the
+                 * first offer is being created allows the camera-reconciliation
+                 * effect to put the physical camera back onto the sender.
+                 */
+                console.log("[CallMedia] Activating initial avatar track", {
                     trackId: track.id,
                     readyState: track.readyState,
                     kind: track.kind,
                 });
 
-                /*
-                 * IMPORTANT: activate the avatar BEFORE creating the
-                 * first SDP offer. enableAvatar() replaces the existing
-                 * video sender with the canvas track and marks avatar
-                 * mode active before negotiation starts.
-                 *
-                 * This ordering prevents the camera-reconciliation
-                 * effect inside useAvatarMedia from putting the physical
-                 * camera track back on the sender between replaceTrack()
-                 * and createOffer().
-                 */
-                await enableAvatarRef.current();
+                if (!isAvatarActiveRef.current) {
+                    await enableAvatarRef.current();
+                }
 
                 if (isStale()) {
                     return;
                 }
 
-                console.log("[CallMedia] Initial avatar track installed before OFFER", {
+                console.log("[CallMedia] Initial avatar sender active", {
                     trackId: track.id,
                     readyState: track.readyState,
-                    kind: track.kind,
                 });
 
                 /*
-                 * The sender now contains the rendered avatar canvas.
-                 * Create the first offer only after that track is active.
+                 * The avatar track is now installed AND avatar mode is
+                 * active. Only now may WebRTC create the first offer.
                  */
                 await startInitialOfferRef.current();
 
                 offerStarted = true;
-
-                if (isStale()) {
-                    return;
-                }
             } catch (caughtError) {
                 if (isStale()) {
                     return;

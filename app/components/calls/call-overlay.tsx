@@ -105,21 +105,64 @@ function VideoSurface({
             return;
         }
 
+        let cancelled = false;
+
+        const play = () => {
+            if (cancelled || !video.srcObject) {
+                return;
+            }
+
+            void video.play().catch((error: unknown) => {
+                if (
+                    error instanceof DOMException &&
+                    error.name === "AbortError"
+                ) {
+                    return;
+                }
+
+                console.warn(
+                    "[WebRTC] Remote video playback was blocked by the browser:",
+                    error,
+                );
+            });
+        };
+
+        const handleTrack = () => {
+            /*
+             * A remote MediaStream can exist before its video track
+             * has produced its first decodable frame. Retry playback
+             * when the track becomes unmuted/active.
+             */
+            play();
+        };
+
         video.srcObject = stream;
+        video.muted = muted;
+        video.volume = muted ? 0 : 1;
+
+        video.addEventListener("loadedmetadata", play);
+        video.addEventListener("canplay", play);
 
         if (stream) {
-            video.muted = muted;
-            video.volume = muted ? 0 : 1;
+            for (const track of stream.getVideoTracks()) {
+                track.addEventListener("unmute", handleTrack);
+            }
 
-            void video.play().catch(() => {
-                /*
-                 * Some browsers may defer playback until
-                 * the user has interacted with the page.
-                 */
-            });
+            play();
         }
 
         return () => {
+            cancelled = true;
+            video.removeEventListener("loadedmetadata", play);
+            video.removeEventListener("canplay", play);
+
+            if (stream) {
+                for (const track of stream.getVideoTracks()) {
+                    track.removeEventListener("unmute", handleTrack);
+                }
+            }
+
+            video.pause();
             video.srcObject = null;
         };
     }, [stream, muted]);
@@ -973,11 +1016,13 @@ export function CallOverlay() {
 
     const hasRemoteVideo =
         isVideo &&
-        remoteVideoEnabled &&
         Boolean(
             remoteStream
                 ?.getVideoTracks()
-                .some((track) => track.readyState === "live"),
+                .some((track) =>
+                    track.readyState === "live" &&
+                    track.enabled,
+                ),
         );
 
     return (
