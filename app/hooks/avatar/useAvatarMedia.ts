@@ -41,6 +41,14 @@ export function useAvatarMedia({
     const switchingRef =
         useRef(false);
 
+    /*
+     * State updates are asynchronous. The WebRTC offer can be created
+     * before React has committed setIsAvatarActive(true), so the camera
+     * reconciliation effect must have an imperative source of truth.
+     */
+    const isAvatarActiveRef =
+        useRef(false);
+
     const mountedRef =
         useRef(true);
 
@@ -98,7 +106,7 @@ export function useAvatarMedia({
          * active, so do not replace the sender with
          * the camera when the camera stream changes.
          */
-        if (isAvatarActive) {
+        if (isAvatarActiveRef.current) {
             return;
         }
 
@@ -388,6 +396,7 @@ export function useAvatarMedia({
                     }
 
                     setError(null);
+                    isAvatarActiveRef.current = true;
                     setIsAvatarActive(true);
                 } catch (error) {
                     const normalized =
@@ -476,6 +485,7 @@ export function useAvatarMedia({
                     }
 
                     setError(null);
+                    isAvatarActiveRef.current = false;
                     setIsAvatarActive(false);
                 } catch (error) {
                     const normalized =
@@ -601,6 +611,8 @@ export function useAvatarMedia({
 
             avatarVideoTrackRef.current =
                 null;
+
+            isAvatarActiveRef.current = false;
 
             avatarCanvasRef.current =
                 null;

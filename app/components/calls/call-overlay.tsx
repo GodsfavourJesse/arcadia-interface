@@ -136,12 +136,48 @@ function VideoSurface({
             play();
         };
 
+        const reportVideo = (eventName: string) => {
+            console.log("[WebRTC] Remote video element state", {
+                event: eventName,
+                readyState: video.readyState,
+                networkState: video.networkState,
+                videoWidth: video.videoWidth,
+                videoHeight: video.videoHeight,
+                currentTime: video.currentTime,
+                paused: video.paused,
+                streamId: stream?.id ?? null,
+                videoTracks:
+                    stream?.getVideoTracks().map((track) => ({
+                        id: track.id,
+                        readyState: track.readyState,
+                        enabled: track.enabled,
+                        muted: track.muted,
+                    })) ?? [],
+            });
+        };
+
+        const handleLoadedMetadata = () => {
+            reportVideo("loadedmetadata");
+            play();
+        };
+
+        const handleLoadedData = () => {
+            reportVideo("loadeddata");
+            play();
+        };
+
+        const handleCanPlay = () => {
+            reportVideo("canplay");
+            play();
+        };
+
         video.srcObject = stream;
         video.muted = muted;
         video.volume = muted ? 0 : 1;
 
-        video.addEventListener("loadedmetadata", play);
-        video.addEventListener("canplay", play);
+        video.addEventListener("loadedmetadata", handleLoadedMetadata);
+        video.addEventListener("loadeddata", handleLoadedData);
+        video.addEventListener("canplay", handleCanPlay);
 
         if (stream) {
             for (const track of stream.getVideoTracks()) {
@@ -153,8 +189,9 @@ function VideoSurface({
 
         return () => {
             cancelled = true;
-            video.removeEventListener("loadedmetadata", play);
-            video.removeEventListener("canplay", play);
+            video.removeEventListener("loadedmetadata", handleLoadedMetadata);
+            video.removeEventListener("loadeddata", handleLoadedData);
+            video.removeEventListener("canplay", handleCanPlay);
 
             if (stream) {
                 for (const track of stream.getVideoTracks()) {

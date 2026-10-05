@@ -81,16 +81,32 @@ export class StaticImageRenderer implements AvatarRenderer {
         // Static image phase: keep the already-painted image unchanged.
     }
 
-    resize(width: number, height: number): void {
+    resize(_width: number, _height: number): void {
         if (this.disposed) {
             return;
         }
 
-        this.width = Math.max(Math.floor(width), 1);
-        this.height = Math.max(Math.floor(height), 1);
+        /*
+         * The DOM preview can become very small (for example when the
+         * avatar preview is split beside the camera). That must NEVER
+         * determine the WebRTC capture resolution.
+         *
+         * WebRTC needs a stable, useful video frame. Keep the outgoing
+         * avatar canvas at 1280x720 and let CSS scale it for local UI.
+         */
+        const width = 1280;
+        const height = 720;
 
-        this.canvas.width = this.width;
-        this.canvas.height = this.height;
+        this.width = width;
+        this.height = height;
+
+        if (
+            this.canvas.width !== width ||
+            this.canvas.height !== height
+        ) {
+            this.canvas.width = width;
+            this.canvas.height = height;
+        }
 
         this.context.imageSmoothingEnabled = true;
         this.context.imageSmoothingQuality = "high";
@@ -131,10 +147,14 @@ export class StaticImageRenderer implements AvatarRenderer {
         this.context.clearRect(0, 0, this.width, this.height);
 
         /*
-         * object-cover equivalent:
-         * fill the complete outgoing video frame without distortion.
+         * Keep the complete uploaded image visible. The remote participant
+         * should see exactly the selected portrait rather than a crop caused
+         * by the local preview dimensions.
          */
-        const scale = Math.max(
+        this.context.fillStyle = "#000";
+        this.context.fillRect(0, 0, this.width, this.height);
+
+        const scale = Math.min(
             this.width / image.naturalWidth,
             this.height / image.naturalHeight,
         );
