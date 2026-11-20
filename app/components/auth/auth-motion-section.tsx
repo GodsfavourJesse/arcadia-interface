@@ -1,22 +1,29 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 
 type AuthMotionSectionProps = {
     children: ReactNode;
     className?: string;
+    delay?: number;
 };
 
-export function AuthMotionSection({ children, className }: AuthMotionSectionProps) {
+export function AuthMotionSection({
+    children,
+    className,
+    delay = 0,
+}: AuthMotionSectionProps) {
+    const reduce = useReducedMotion();
+
     return (
-        <motion.section
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, ease: "easeOut" }}
+        <motion.div
+            initial={reduce ? false : { opacity: 0, y: 16, filter: "blur(6px)" }}
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            transition={{ duration: 0.6, delay, ease: [0.22, 1, 0.36, 1] }}
             className={className}
         >
             {children}
-        </motion.section>
+        </motion.div>
     );
 }

@@ -5,27 +5,35 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { AnimatePresence, motion } from "framer-motion";
+import { toast } from "sonner";
 
 import {
     signupSchema,
     type SignupFormValues,
 } from "../../schemas/auth.schemas";
 import { useAuth } from "../../hooks/auth/useAuth";
-import { toast } from "sonner";
+import {
+    AuthField,
+    FormAlert,
+    PasswordField,
+    SubmitButton,
+} from "@/app/components/auth/auth-fields";
 
 export function SignupForm() {
     const router = useRouter();
     const { signup, isLoading } = useAuth();
 
     const [submitError, setSubmitError] = useState<string | null>(null);
-    const [showPassword, setShowPassword] = useState(false);
 
     const {
         register,
         handleSubmit,
+        watch,
         formState: { errors },
     } = useForm<SignupFormValues>({
         resolver: zodResolver(signupSchema),
+        mode: "onTouched",
         defaultValues: {
             displayName: "",
             username: "",
@@ -33,6 +41,8 @@ export function SignupForm() {
             password: "",
         },
     });
+
+    const password = watch("password");
 
     async function onSubmit(values: SignupFormValues) {
         setSubmitError(null);
@@ -44,13 +54,20 @@ export function SignupForm() {
                 email: values.email,
                 password: values.password,
             });
-            toast.success("Check your inbox", { description: "We sent a link to verify your email address." });
+            toast.success("Check your inbox", {
+                description: "We sent a link to verify your email address.",
+            });
 
             router.push(
                 `/verification-sent?email=${encodeURIComponent(result.email)}`,
             );
         } catch (error) {
-            toast.error("Account creation failed", { description: error instanceof Error ? error.message : "Please review your details and try again." });
+            toast.error("Account creation failed", {
+                description:
+                    error instanceof Error
+                        ? error.message
+                        : "Please review your details and try again.",
+            });
             setSubmitError(
                 error instanceof Error
                     ? error.message
@@ -60,131 +77,66 @@ export function SignupForm() {
     }
 
     return (
-        <form
-            onSubmit={handleSubmit(onSubmit)}
-            className="space-y-5"
-        >
-            <div className="space-y-2">
-                <label
-                    htmlFor="displayName"
-                    className="text-sm font-medium"
-                >
-                    Display name
-                </label>
-
-                <input
+        <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
+            <div className="grid gap-5 sm:grid-cols-2">
+                <AuthField
                     id="displayName"
+                    label="Display name"
                     type="text"
                     autoComplete="name"
                     placeholder="Your name"
+                    error={errors.displayName?.message}
                     {...register("displayName")}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-[#0971ED] focus:ring-4 focus:ring-blue-100"
                 />
 
-                {errors.displayName && (
-                    <p className="text-sm text-red-600">
-                        {errors.displayName.message}
-                    </p>
-                )}
-            </div>
-
-            <div className="space-y-2">
-                <label
-                    htmlFor="username"
-                    className="text-sm font-medium"
-                >
-                    Username
-                </label>
-
-                <input
+                <AuthField
                     id="username"
+                    label="Username"
                     type="text"
                     autoComplete="username"
                     placeholder="your_username"
+                    leading="@"
+                    error={errors.username?.message}
                     {...register("username")}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-[#0971ED] focus:ring-4 focus:ring-blue-100"
                 />
-
-                {errors.username && (
-                    <p className="text-sm text-red-600">
-                        {errors.username.message}
-                    </p>
-                )}
             </div>
 
-            <div className="space-y-2">
-                <label
-                    htmlFor="email"
-                    className="text-sm font-medium"
-                >
-                    Email
-                </label>
+            <AuthField
+                id="email"
+                label="Email"
+                type="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+                error={errors.email?.message}
+                {...register("email")}
+            />
 
-                <input
-                    id="email"
-                    type="email"
-                    autoComplete="email"
-                    placeholder="you@example.com"
-                    {...register("email")}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-[#0971ED] focus:ring-4 focus:ring-blue-100"
-                />
-
-                {errors.email && (
-                    <p className="text-sm text-red-600">
-                        {errors.email.message}
-                    </p>
-                )}
-            </div>
-
-            <div className="space-y-2">
-                <label
-                    htmlFor="password"
-                    className="text-sm font-medium"
-                >
-                    Password
-                </label>
-
-                <div className="relative">
-                <input
+            <div>
+                <PasswordField
                     id="password"
-                    type={showPassword ? "text" : "password"}
+                    label="Password"
                     autoComplete="new-password"
                     placeholder="At least 8 characters"
+                    error={errors.password?.message}
                     {...register("password")}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 pr-12 text-sm outline-none transition placeholder:text-slate-400 focus:border-[#0971ED] focus:ring-4 focus:ring-blue-100"
                 />
-                <button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} className="absolute inset-y-0 right-3 flex items-center text-slate-400 transition hover:text-[#0971ED]"><EyeIcon visible={showPassword} /></button>
-                </div>
 
-                {errors.password && (
-                    <p className="text-sm text-red-600">
-                        {errors.password.message}
-                    </p>
-                )}
+                <StrengthMeter password={password ?? ""} />
             </div>
 
-            {submitError && (
-                <div
-                    role="alert"
-                    className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
-                >
-                    {submitError}
-                </div>
-            )}
+            <AnimatePresence initial={false}>
+                {submitError && <FormAlert key="error">{submitError}</FormAlert>}
+            </AnimatePresence>
 
-            <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full rounded-xl bg-[#0971ED] px-4 py-3.5 font-semibold text-white shadow-lg shadow-blue-600/15 transition hover:bg-[#075fc8] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-                {isLoading ? "Creating account..." : "Create account"}
-            </button>
+            <SubmitButton loading={isLoading} loadingText="Creating account...">
+                Create account
+            </SubmitButton>
 
-            <p className="text-center text-sm text-muted-foreground">
+            <p className="pt-1 text-center text-sm text-[#0C1A2E]/60">
                 Already have an account?{" "}
                 <Link
                     href="/login"
-                    className="font-semibold text-[#0971ED] hover:underline"
+                    className="rounded font-semibold text-[#0971ED] underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0971ED]"
                 >
                     Sign in
                 </Link>
@@ -193,6 +145,63 @@ export function SignupForm() {
     );
 }
 
-function EyeIcon({ visible }: { visible: boolean }) {
-    return <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M2.5 12s3.3-6 9.5-6 9.5 6 9.5 6-3.3 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/>{visible && <path d="m4 4 16 16"/>}</svg>;
+/* Visual guide only; your schema still decides what is valid. */
+function scorePassword(pw: string) {
+    let score = 0;
+    if (pw.length >= 8) score += 1;
+    if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score += 1;
+    if (/\d/.test(pw)) score += 1;
+    if (/[^A-Za-z0-9]/.test(pw) || pw.length >= 14) score += 1;
+    return score;
+}
+
+const levels = [
+    { label: "Too short", bar: "bg-red-400", text: "text-red-600" },
+    { label: "Weak", bar: "bg-red-400", text: "text-red-600" },
+    { label: "Fair", bar: "bg-amber-400", text: "text-amber-600" },
+    { label: "Good", bar: "bg-[#2BA6FF]", text: "text-[#0971ED]" },
+    { label: "Strong", bar: "bg-emerald-500", text: "text-emerald-600" },
+];
+
+function StrengthMeter({ password }: { password: string }) {
+    const score = scorePassword(password);
+    const level = levels[score];
+
+    return (
+        <AnimatePresence initial={false}>
+            {password.length > 0 && (
+                <motion.div
+                    key="meter"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="overflow-hidden"
+                    aria-live="polite"
+                >
+                    <div className="flex items-center gap-3 pt-2.5">
+                        <div className="flex flex-1 gap-1.5" aria-hidden="true">
+                            {[1, 2, 3, 4].map((i) => (
+                                <span
+                                    key={i}
+                                    className="h-1.5 flex-1 overflow-hidden rounded-full bg-[#0C1A2E]/10"
+                                >
+                                    <motion.span
+                                        className={`block h-full rounded-full ${level.bar}`}
+                                        initial={false}
+                                        animate={{ width: score >= i ? "100%" : "0%" }}
+                                        transition={{ duration: 0.3 }}
+                                    />
+                                </span>
+                            ))}
+                        </div>
+
+                        <span className={`w-14 text-right text-xs font-semibold ${level.text}`}>
+                            {level.label}
+                        </span>
+                    </div>
+                </motion.div>
+            )}
+        </AnimatePresence>
+    );
 }
