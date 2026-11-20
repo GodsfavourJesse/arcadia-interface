@@ -50,7 +50,8 @@ export type RealtimeConversationEvent =
           readerId: string;
           messageIds: string[];
           readAt: string;
-      };
+      }
+    | { type: "MESSAGE_UPDATED"; message: Message };
 
 /* -------------------------------------------------------------------------- */
 /* Presence events                                                            */

@@ -72,11 +72,14 @@ export default function ConversationPage() {
         isSending,
         error: messagesError,
         sendMessage,
+        changeMessage,
         markAsRead,
     } =
         useConversationMessages(
             conversationId,
         );
+    const [replyTo, setReplyTo] = useState<import("@/app/types/conversations/conversations.types").Message | null>(null);
+    const [editing, setEditing] = useState<import("@/app/types/conversations/conversations.types").Message | null>(null);
 
     useEffect(() => {
         if (!conversationId) {
@@ -176,8 +179,8 @@ export default function ConversationPage() {
         );
 
     return (
-        <main className="mx-auto flex h-[calc(100vh-80px)] w-full max-w-5xl flex-col px-4 py-4">
-            <div className="mb-4">
+        <main className="flex h-full min-h-0 w-full min-w-0 flex-col p-2 sm:p-4">
+            <div className="mb-2 md:hidden">
                 <Link
                     href="/dashboard/conversations"
                     className="text-sm font-medium text-slate-500 hover:text-slate-900"
@@ -187,8 +190,8 @@ export default function ConversationPage() {
             </div>
 
             <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <header className="flex items-center gap-3 border-b border-slate-200 p-4">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 font-semibold text-slate-600">
+                <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-3 py-3 sm:px-5">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-100 to-cyan-100 font-semibold text-[#0971ED]">
                         {otherMember?.user.displayName
                             ?.charAt(0)
                             .toUpperCase() ?? "?"}
@@ -272,6 +275,9 @@ export default function ConversationPage() {
                         messages={messages}
                         currentUserId={user.id}
                         onReachedNewest={markAsRead}
+                        onReply={(message) => { setReplyTo(message); setEditing(null); }}
+                        onEdit={(message) => { setEditing(message); setReplyTo(null); }}
+                        onDelete={(message) => { if (window.confirm("Delete this message for everyone?")) void changeMessage(message.id, "", true); }}
                     />
                 )}
 
@@ -281,9 +287,14 @@ export default function ConversationPage() {
                     ) => {
                         await sendMessage(
                             message,
+                            replyTo?.id,
                         );
                     }}
                     isSending={isSending}
+                    replyTo={replyTo}
+                    editing={editing}
+                    onCancelContext={() => { setReplyTo(null); setEditing(null); }}
+                    onEdit={async (messageId, body) => { await changeMessage(messageId, body); }}
                 />
             </section>
         </main>

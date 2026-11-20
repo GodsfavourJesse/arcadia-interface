@@ -18,6 +18,7 @@ type UseConversationsRealtimeOptions = {
     onMessageNew?: (
         message: Message,
     ) => void;
+    onMessageUpdated?: (message: Message) => void;
 
     onMessageRead?: (event: {
         conversationId: string;
@@ -34,6 +35,7 @@ type UseConversationsRealtimeOptions = {
 export function useConversationsRealtime({
     conversationIds,
     onMessageNew,
+    onMessageUpdated,
     onMessageRead,
     onConnectionStateChange,
 }: UseConversationsRealtimeOptions) {
@@ -42,6 +44,7 @@ export function useConversationsRealtime({
 
     const onMessageNewRef =
         useRef(onMessageNew);
+    const onMessageUpdatedRef = useRef(onMessageUpdated);
 
     const onMessageReadRef =
         useRef(onMessageRead);
@@ -69,6 +72,8 @@ export function useConversationsRealtime({
         onMessageNewRef.current =
             onMessageNew;
     }, [onMessageNew]);
+
+    useEffect(() => { onMessageUpdatedRef.current = onMessageUpdated; }, [onMessageUpdated]);
 
     useEffect(() => {
         onMessageReadRef.current =
@@ -183,6 +188,9 @@ export function useConversationsRealtime({
                                 event.message as Message,
                             );
 
+                            break;
+                        case "MESSAGE_UPDATED":
+                            onMessageUpdatedRef.current?.(event.message as Message);
                             break;
 
                         case "MESSAGE_READ":

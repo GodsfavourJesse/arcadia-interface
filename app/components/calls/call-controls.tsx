@@ -74,7 +74,8 @@ export function CallControls({
 }: Props) {
     if (isIncoming) {
         return (
-            <div className="flex items-center justify-center gap-8">
+            <div className="flex items-start justify-center gap-12">
+                <div className="flex flex-col items-center gap-2">
                 <button
                     type="button"
                     onClick={onDecline}
@@ -84,12 +85,15 @@ export function CallControls({
                 >
                     <XIcon />
                 </button>
+                <span className="text-xs font-medium text-white/75">Decline</span>
+                </div>
 
+                <div className="flex flex-col items-center gap-2">
                 <button
                     type="button"
                     onClick={onAccept}
                     disabled={isActionPending}
-                    className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-950/30 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex h-16 w-16 items-center justify-center rounded-full bg-[#0971ED] text-white shadow-lg shadow-blue-950/35 ring-4 ring-blue-400/20 transition hover:scale-105 hover:bg-[#1684ff] disabled:cursor-not-allowed disabled:opacity-50"
                     aria-label={
                         type === CALL_TYPE.VIDEO
                             ? "Accept video call"
@@ -102,13 +106,15 @@ export function CallControls({
                         <PhoneIcon />
                     )}
                 </button>
+                <span className="text-xs font-medium text-white/75">Answer</span>
+                </div>
             </div>
         );
     }
 
     if (isOutgoing) {
         return (
-            <div className="flex justify-center">
+            <div className="flex flex-col items-center gap-2">
                 <button
                     type="button"
                     onClick={onCancel}
@@ -118,6 +124,7 @@ export function CallControls({
                 >
                     <XIcon />
                 </button>
+                <span className="text-xs font-medium text-white/75">Cancel call</span>
             </div>
         );
     }
@@ -133,7 +140,7 @@ export function CallControls({
         !isConnected
     ) {
         return (
-            <div className="flex items-center justify-center">
+            <div className="flex flex-col items-center justify-center gap-2">
                 <button
                     type="button"
                     onClick={onEnd}
@@ -143,13 +150,14 @@ export function CallControls({
                 >
                     <XIcon />
                 </button>
+                <span className="text-xs font-medium text-white/75">End call</span>
             </div>
         );
     }
 
     if (isConnected) {
         return (
-            <div className="flex items-center justify-center">
+            <div className="flex flex-col items-center justify-center gap-2">
                 <button
                     type="button"
                     onClick={onEnd}
@@ -159,6 +167,7 @@ export function CallControls({
                 >
                     <XIcon />
                 </button>
+                <span className="text-xs font-medium text-white/75">End call</span>
             </div>
         );
     }

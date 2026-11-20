@@ -7,6 +7,7 @@ import type {
     MarkConversationReadResponse,
     MessagesResponse,
     SendMessageResponse,
+    Message,
 } from "@/app/types/conversations/conversations.types";
 
 export async function getConversations() {
@@ -82,6 +83,7 @@ export async function getConversationMessages(
 export async function sendConversationMessage(
     conversationId: string,
     body: string,
+    replyToMessageId?: string,
 ) {
     return apiRequest<SendMessageResponse>(
         `/conversations/${conversationId}/messages`,
@@ -89,9 +91,18 @@ export async function sendConversationMessage(
             method: "POST",
             body: JSON.stringify({
                 body,
+                replyToMessageId,
             }),
         },
     );
+}
+
+export async function editConversationMessage(conversationId: string, messageId: string, body: string) {
+    return apiRequest<SendMessageResponse>(`/conversations/${conversationId}/messages/${messageId}`, { method: "PATCH", body: JSON.stringify({ body }) });
+}
+
+export async function deleteConversationMessage(conversationId: string, messageId: string) {
+    return apiRequest<{ status: "ok"; message: Message }>(`/conversations/${conversationId}/messages/${messageId}`, { method: "DELETE" });
 }
 
 export async function markConversationAsRead(

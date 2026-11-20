@@ -54,6 +54,7 @@ export type Message = {
     conversationId: string;
     senderId: string;
     body: string;
+    replyToMessageId?: string | null;
     createdAt: string;
     updatedAt: string;
     readAt: string | null;

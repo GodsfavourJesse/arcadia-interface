@@ -28,12 +28,18 @@ type MessageListProps = {
      * message was seen.
      */
     onReachedNewest?: () => void;
+    onReply?: (message: Message) => void;
+    onEdit?: (message: Message) => void;
+    onDelete?: (message: Message) => void;
 };
 
 export function MessageList({
     messages,
     currentUserId,
     onReachedNewest,
+    onReply,
+    onEdit,
+    onDelete,
 }: MessageListProps) {
     const scrollContainerRef =
         useRef<HTMLDivElement | null>(null);
@@ -339,15 +345,12 @@ export function MessageList({
                                 <div
                                     className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${
                                         isOwn
-                                            ? "rounded-br-md bg-slate-900 text-white"
+                                            ? "rounded-br-md bg-[#0971ED] text-white"
                                             : "rounded-bl-md bg-slate-100 text-slate-900"
                                     }`}
                                 >
-                                    <p className="whitespace-pre-wrap break-words text-sm">
-                                        {
-                                            message.body
-                                        }
-                                    </p>
+                                    {message.replyToMessageId && messages.find((item) => item.id === message.replyToMessageId) && <p className="mb-2 rounded-lg border-l-2 border-[#2BC6FF] bg-black/5 px-2.5 py-1.5 text-xs opacity-80">Replying to: {messages.find((item) => item.id === message.replyToMessageId)?.body}</p>}
+                                    <p className="whitespace-pre-wrap break-words text-sm">{message.deletedAt ? "Message deleted" : message.body}</p>
 
                                     <div
                                         className={`mt-1 flex items-center justify-end gap-1.5 text-[11px] ${
@@ -376,6 +379,11 @@ export function MessageList({
                                             </span>
                                         )}
                                     </div>
+                                    {!message.deletedAt && <div className={`mt-2 flex gap-3 text-[11px] ${isOwn ? "text-white/65" : "text-slate-500"}`}>
+                                        <button type="button" onClick={() => onReply?.(message)} className="hover:underline">Reply</button>
+                                        {isOwn && <button type="button" onClick={() => onEdit?.(message)} className="hover:underline">Edit</button>}
+                                        {isOwn && <button type="button" onClick={() => onDelete?.(message)} className="hover:underline">Delete</button>}
+                                    </div>}
                                 </div>
                             </div>
                         );

@@ -11,6 +11,8 @@ import {
     getConversationMessages,
     markConversationAsRead,
     sendConversationMessage,
+    editConversationMessage,
+    deleteConversationMessage,
 } from "@/app/services/conversation/conversations.service";
 
 import type {
@@ -20,6 +22,7 @@ import type {
 import {
     useConversationsRealtime,
 } from "./useConversationsRealtime";
+import { toast } from "sonner";
 
 /*
  * How often to re-fetch recent messages over REST
@@ -277,6 +280,8 @@ export function useConversationMessages(
                 addMessage(message);
             },
 
+        onMessageUpdated: addMessage,
+
         onMessageRead:
             handleMessageRead,
 
@@ -458,7 +463,7 @@ export function useConversationMessages(
      */
     const sendMessage =
         useCallback(
-            async (body: string) => {
+            async (body: string, replyToMessageId?: string) => {
                 const trimmed =
                     body.trim();
 
@@ -485,6 +490,7 @@ export function useConversationMessages(
                         await sendConversationMessage(
                             conversationId,
                             trimmed,
+                            replyToMessageId,
                         );
 
                     /*
@@ -497,6 +503,7 @@ export function useConversationMessages(
 
                     return response.message;
                 } catch (error) {
+                    toast.error("Message could not be sent", { description: error instanceof Error ? error.message : "Check your connection and try again." });
                     setError(
                         error instanceof Error
                             ? error.message
@@ -514,6 +521,21 @@ export function useConversationMessages(
             ],
         );
 
+    const changeMessage = useCallback(async (messageId: string, body: string, deleted = false) => {
+        if (!conversationId) throw new Error("Conversation ID is missing.");
+        try {
+            const result = deleted
+                ? await deleteConversationMessage(conversationId, messageId)
+                : await editConversationMessage(conversationId, messageId, body);
+            setMessages((current) => current.map((item) => item.id === messageId ? result.message : item));
+            setError(null);
+        } catch (cause) {
+            toast.error(deleted ? "Could not delete message" : "Could not update message", { description: cause instanceof Error ? cause.message : "Please try again." });
+            setError(cause instanceof Error ? cause.message : "Unable to update message.");
+            throw cause;
+        }
+    }, [conversationId]);
+
     return {
         messages,
         isLoading,
@@ -521,6 +543,7 @@ export function useConversationMessages(
         error,
         reload: loadMessages,
         sendMessage,
+        changeMessage,
         markAsRead,
     };
 }

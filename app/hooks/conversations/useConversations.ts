@@ -18,8 +18,11 @@ import type {
 import {
     useConversationsRealtime,
 } from "./useConversationsRealtime";
+import { useAuth } from "@/app/hooks/auth/useAuth";
+import { toast } from "sonner";
 
 export function useConversations() {
+    const { user } = useAuth();
     const [
         conversations,
         setConversations,
@@ -67,11 +70,15 @@ export function useConversations() {
 
     const handleNewMessage =
         useCallback(
-            () => {
+            (message: import("@/app/types/conversations/conversations.types").Message) => {
                 void loadConversations();
+                if (message.senderId !== user?.id) toast("New message", { id: `message-${message.id}`, description: message.sender.displayName, action: { label: "Open chat", onClick: () => { window.location.href = `/dashboard/conversations/${message.conversationId}`; } } });
             },
-            [loadConversations],
+            [loadConversations, user?.id],
         );
+
+    const handleMessagesRead = useCallback(() => { void loadConversations(); }, [loadConversations]);
+    const handleMessageUpdated = useCallback(() => { void loadConversations(); }, [loadConversations]);
 
     useConversationsRealtime({
         conversationIds:
@@ -81,6 +88,8 @@ export function useConversations() {
             ),
         onMessageNew:
             handleNewMessage,
+        onMessageRead: handleMessagesRead,
+        onMessageUpdated: handleMessageUpdated,
     });
 
     const startConversation =

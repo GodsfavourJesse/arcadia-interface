@@ -296,7 +296,7 @@ function TabButton({
             onClick={onClick}
             className={
                 active
-                    ? "whitespace-nowrap rounded-xl bg-slate-950 px-3.5 py-2 text-sm font-semibold text-white"
+                    ? "whitespace-nowrap rounded-xl bg-[#0971ED] px-3.5 py-2 text-sm font-semibold text-white"
                     : "whitespace-nowrap rounded-xl bg-white px-3.5 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100"
             }
         >

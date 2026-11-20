@@ -11,12 +11,14 @@ import {
     type SignupFormValues,
 } from "../../schemas/auth.schemas";
 import { useAuth } from "../../hooks/auth/useAuth";
+import { toast } from "sonner";
 
 export function SignupForm() {
     const router = useRouter();
     const { signup, isLoading } = useAuth();
 
     const [submitError, setSubmitError] = useState<string | null>(null);
+    const [showPassword, setShowPassword] = useState(false);
 
     const {
         register,
@@ -42,11 +44,13 @@ export function SignupForm() {
                 email: values.email,
                 password: values.password,
             });
+            toast.success("Check your inbox", { description: "We sent a link to verify your email address." });
 
             router.push(
                 `/verification-sent?email=${encodeURIComponent(result.email)}`,
             );
         } catch (error) {
+            toast.error("Account creation failed", { description: error instanceof Error ? error.message : "Please review your details and try again." });
             setSubmitError(
                 error instanceof Error
                     ? error.message
@@ -74,7 +78,7 @@ export function SignupForm() {
                     autoComplete="name"
                     placeholder="Your name"
                     {...register("displayName")}
-                    className="w-full rounded-lg border px-4 py-3 outline-none focus:ring-2"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-[#0971ED] focus:ring-4 focus:ring-blue-100"
                 />
 
                 {errors.displayName && (
@@ -98,7 +102,7 @@ export function SignupForm() {
                     autoComplete="username"
                     placeholder="your_username"
                     {...register("username")}
-                    className="w-full rounded-lg border px-4 py-3 outline-none focus:ring-2"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-[#0971ED] focus:ring-4 focus:ring-blue-100"
                 />
 
                 {errors.username && (
@@ -122,7 +126,7 @@ export function SignupForm() {
                     autoComplete="email"
                     placeholder="you@example.com"
                     {...register("email")}
-                    className="w-full rounded-lg border px-4 py-3 outline-none focus:ring-2"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-[#0971ED] focus:ring-4 focus:ring-blue-100"
                 />
 
                 {errors.email && (
@@ -140,14 +144,17 @@ export function SignupForm() {
                     Password
                 </label>
 
+                <div className="relative">
                 <input
                     id="password"
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     autoComplete="new-password"
                     placeholder="At least 8 characters"
                     {...register("password")}
-                    className="w-full rounded-lg border px-4 py-3 outline-none focus:ring-2"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 pr-12 text-sm outline-none transition placeholder:text-slate-400 focus:border-[#0971ED] focus:ring-4 focus:ring-blue-100"
                 />
+                <button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} className="absolute inset-y-0 right-3 flex items-center text-slate-400 transition hover:text-[#0971ED]"><EyeIcon visible={showPassword} /></button>
+                </div>
 
                 {errors.password && (
                     <p className="text-sm text-red-600">
@@ -168,7 +175,7 @@ export function SignupForm() {
             <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full rounded-lg px-4 py-3 font-medium disabled:cursor-not-allowed disabled:opacity-50"
+                className="w-full rounded-xl bg-[#0971ED] px-4 py-3.5 font-semibold text-white shadow-lg shadow-blue-600/15 transition hover:bg-[#075fc8] disabled:cursor-not-allowed disabled:opacity-50"
             >
                 {isLoading ? "Creating account..." : "Create account"}
             </button>
@@ -177,11 +184,15 @@ export function SignupForm() {
                 Already have an account?{" "}
                 <Link
                     href="/login"
-                    className="font-medium underline"
+                    className="font-semibold text-[#0971ED] hover:underline"
                 >
                     Sign in
                 </Link>
             </p>
         </form>
     );
+}
+
+function EyeIcon({ visible }: { visible: boolean }) {
+    return <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M2.5 12s3.3-6 9.5-6 9.5 6 9.5 6-3.3 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/>{visible && <path d="m4 4 16 16"/>}</svg>;
 }
