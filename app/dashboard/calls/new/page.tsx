@@ -2,6 +2,18 @@
 
 import Link from "next/link";
 import { useCallback, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import {
+    AlertCircle,
+    CheckCircle2,
+    ChevronLeft,
+    Loader2,
+    Phone,
+    PhoneCall,
+    Search,
+    SearchX,
+    Video,
+} from "lucide-react";
 
 import { createDirectConversation } from "@/app/services/conversation/conversations.service";
 import { searchUsers } from "@/app/services/users/users.service";
@@ -10,31 +22,18 @@ import { CALL_TYPE } from "@/app/types/calls/calls.types";
 import type { CallType } from "@/app/types/calls/calls.types";
 import type { DiscoverableUser } from "@/app/types/users/users.types";
 import { useActiveCall } from "@/app/hooks/calls/useActiveCall";
-
-function UserAvatar({ user }: { user: DiscoverableUser }) {
-    if (user.profilePictureUrl) {
-        return (
-            <img
-                src={user.profilePictureUrl}
-                alt=""
-                className="h-14 w-14 shrink-0 rounded-full object-cover"
-            />
-        );
-    }
-
-    const initials = user.displayName
-        .split(/\s+/)
-        .filter(Boolean)
-        .slice(0, 2)
-        .map((part) => part[0]?.toUpperCase())
-        .join("") || "M";
-
-    return (
-        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-blue-50 text-lg font-semibold text-[#0971ED]">
-            {initials}
-        </div>
-    );
-}
+import {
+    Avatar,
+    EmptyState,
+    IconTile,
+    Page,
+    PageHeader,
+    StaggerItem,
+    StaggerList,
+    Surface,
+    ease,
+    focusRing,
+} from "@/app/components/dashboard/dashboard-ui";
 
 export default function MakeCallPage() {
     const startCall = useCallStore((state) => state.startCall);
@@ -47,6 +46,7 @@ export default function MakeCallPage() {
     const [isSearching, setIsSearching] = useState(false);
     const [isPreparing, setIsPreparing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [searched, setSearched] = useState(false);
     const busy = isStarting || isPreparing;
     const visibleError = error ?? storeError;
 
@@ -64,6 +64,7 @@ export default function MakeCallPage() {
 
         try {
             const response = await searchUsers(searchTerm);
+            setSearched(true);
             setResults(response.results);
             if (response.results.length === 0) {
                 setError("No Miyor member matched that search.");
@@ -98,108 +99,249 @@ export default function MakeCallPage() {
 
     if (activeCall) {
         return (
-            <main className="min-h-screen bg-slate-50 px-6 py-10">
-                <div className="mx-auto max-w-2xl rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-                    <h1 className="text-xl font-semibold text-slate-950">You’re already in a call</h1>
-                    <p className="mt-2 text-sm text-slate-500">End the current call before starting another one.</p>
-                    <Link href="/dashboard" className="mt-6 inline-flex rounded-xl bg-[#0971ED] px-5 py-3 text-sm font-semibold text-white">Back to dashboard</Link>
-                </div>
-            </main>
+            <Page width="max-w-2xl">
+                <Surface>
+                    <EmptyState
+                        icon={PhoneCall}
+                        title="You’re already in a call"
+                        text="End the current call before starting another one."
+                        action={
+                            <Link
+                                href="/dashboard"
+                                className={`inline-flex h-11 items-center rounded-xl bg-[#0971ED] px-5 text-sm font-semibold text-white ${focusRing}`}
+                            >
+                                Back to dashboard
+                            </Link>
+                        }
+                    />
+                </Surface>
+            </Page>
         );
     }
 
     return (
-        <main className="min-h-screen bg-slate-50 px-6 py-8">
-            <div className="mx-auto w-full max-w-3xl">
-                <Link href="/dashboard" className="text-sm font-medium text-slate-500 hover:text-slate-950">← Dashboard</Link>
-                <header className="mt-8">
-                    <p className="text-sm font-medium text-slate-500">MIYOR</p>
-                    <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-950">Start a call</h1>
-                    <p className="mt-2 text-sm leading-6 text-slate-500">Find a Miyor member, then choose voice or video.</p>
-                </header>
+        <Page width="max-w-3xl">
+            <Link
+                href="/dashboard/calls"
+                className={`mb-4 inline-flex items-center gap-1 rounded-full py-1.5 pr-3 text-sm font-semibold text-[#0971ED] ${focusRing}`}
+            >
+                <ChevronLeft size={18} aria-hidden="true" />
+                Calls
+            </Link>
 
+            <PageHeader
+                title="Start a call"
+                subtitle="Find a Miyor member, then choose voice or video."
+            />
+
+            <AnimatePresence initial={false}>
                 {visibleError && (
-                    <p role="alert" className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{visibleError}</p>
-                )}
-
-                <section className="mt-7 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-                    <h2 className="text-lg font-semibold text-slate-950">Who would you like to call?</h2>
-                    <p className="mt-1 text-sm text-slate-500">Search by Miyor number or username.</p>
-                    <form
-                        className="mt-5 flex flex-col gap-3 sm:flex-row"
-                        onSubmit={(event) => {
-                            event.preventDefault();
-                            void handleSearch();
-                        }}
+                    <motion.p
+                        key="error"
+                        role="alert"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="mb-4 overflow-hidden"
                     >
+                        <span className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                            <AlertCircle size={20} className="mt-0.5 shrink-0" aria-hidden="true" />
+                            {visibleError}
+                        </span>
+                    </motion.p>
+                )}
+            </AnimatePresence>
+
+            <Surface className="p-4 sm:p-7">
+                <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight">
+                    Who would you like to call?
+                </h2>
+                <p className="mt-1 text-sm text-[#0C1A2E]/55">
+                    Search by Miyor number or username.
+                </p>
+
+                <form
+                    className="mt-5 flex flex-col gap-3 sm:flex-row"
+                    onSubmit={(event) => {
+                        event.preventDefault();
+                        void handleSearch();
+                    }}
+                >
+                    <label className="flex h-12 flex-1 items-center gap-2.5 rounded-xl border border-[#0C1A2E]/15 bg-white px-4 transition focus-within:border-[#0971ED] focus-within:ring-4 focus-within:ring-[#0971ED]/15">
+                        <Search size={18} className="shrink-0 text-[#0C1A2E]/40" aria-hidden="true" />
                         <input
                             value={query}
                             onChange={(event) => setQuery(event.target.value)}
                             autoComplete="off"
                             placeholder="Miyor number or username"
                             aria-label="Miyor number or username"
-                            className="h-12 flex-1 rounded-xl border border-slate-200 px-4 text-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                            className="w-full border-0 bg-transparent p-0 text-[15px] outline-none placeholder:text-[#0C1A2E]/40 focus:ring-0"
                         />
-                        <button
-                            type="submit"
-                            disabled={isSearching || !query.trim()}
-                            className="h-12 rounded-xl bg-[#0971ED] px-5 text-sm font-semibold text-white hover:bg-[#075fc8] disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                            {isSearching ? "Searching…" : "Search"}
-                        </button>
-                    </form>
+                    </label>
 
-                    {results.length > 0 && (
-                        <div className="mt-5 space-y-3">
-                            {results.map((member) => (
-                                <button
-                                    key={member.id}
-                                    type="button"
-                                    onClick={() => setSelectedUser(member)}
-                                    aria-pressed={selectedUser?.id === member.id}
-                                    className={`flex w-full items-center gap-4 rounded-2xl border p-4 text-left transition ${selectedUser?.id === member.id ? "border-[#0971ED] bg-blue-50/60" : "border-slate-200 hover:border-slate-300"}`}
-                                >
-                                    <UserAvatar user={member} />
-                                    <span className="min-w-0 flex-1">
-                                        <span className="block truncate font-semibold text-slate-950">{member.displayName}</span>
-                                        <span className="mt-0.5 block truncate text-sm text-slate-500">
-                                            {member.miyorNumber ? `Miyor #${member.miyorNumber}` : `@${member.username}`}
+                    <motion.button
+                        type="submit"
+                        disabled={isSearching || !query.trim()}
+                        whileTap={{ scale: 0.97 }}
+                        className={`flex h-12 items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-[#2B8CF5] to-[#0971ED] px-6 text-[15px] font-semibold text-white shadow-[0_10px_24px_-8px_rgba(9,113,237,0.7)] disabled:cursor-not-allowed disabled:opacity-50 ${focusRing}`}
+                    >
+                        {isSearching ? (
+                            <>
+                                <Loader2 size={18} className="animate-spin" aria-hidden="true" />
+                                Searching…
+                            </>
+                        ) : (
+                            "Search"
+                        )}
+                    </motion.button>
+                </form>
+
+                {/* Results */}
+                {results.length > 0 && (
+                    <StaggerList className="mt-5 space-y-2.5">
+                        {results.map((member) => {
+                            const selected = selectedUser?.id === member.id;
+
+                            return (
+                                <StaggerItem key={member.id}>
+                                    <motion.button
+                                        type="button"
+                                        onClick={() => setSelectedUser(member)}
+                                        aria-pressed={selected}
+                                        whileTap={{ scale: 0.985 }}
+                                        className={`flex w-full items-center gap-4 rounded-2xl border p-3.5 text-left transition-colors ${
+                                            selected
+                                                ? "border-[#0971ED] bg-[#0971ED]/[0.06] ring-4 ring-[#0971ED]/10"
+                                                : "border-[#0C1A2E]/10 bg-white/70 hover:border-[#0971ED]/40"
+                                        } ${focusRing}`}
+                                    >
+                                        <Avatar
+                                            name={member.displayName}
+                                            src={member.profilePictureUrl}
+                                            size={52}
+                                        />
+
+                                        <span className="min-w-0 flex-1">
+                                            <span className="block truncate text-[15px] font-semibold">
+                                                {member.displayName}
+                                            </span>
+                                            <span className="mt-0.5 block truncate text-sm text-[#0C1A2E]/55">
+                                                {member.miyorNumber
+                                                    ? `Miyor #${member.miyorNumber}`
+                                                    : `@${member.username}`}
+                                            </span>
                                         </span>
-                                    </span>
-                                    {selectedUser?.id === member.id && <span className="text-sm font-semibold text-[#0971ED]">Selected</span>}
-                                </button>
-                            ))}
-                        </div>
-                    )}
 
+                                        {selected && (
+                                            <CheckCircle2
+                                                size={24}
+                                                className="shrink-0 text-[#0971ED]"
+                                                aria-label="Selected"
+                                            />
+                                        )}
+                                    </motion.button>
+                                </StaggerItem>
+                            );
+                        })}
+                    </StaggerList>
+                )}
+
+                {searched && !isSearching && results.length === 0 && (
+                    <EmptyState
+                        icon={SearchX}
+                        title="No members found"
+                        text="Check the Miyor number or username and try again."
+                    />
+                )}
+
+                {/* Call type */}
+                <AnimatePresence initial={false}>
                     {selectedUser && (
-                        <div className="mt-8 border-t border-slate-100 pt-6">
-                            <p className="text-sm font-medium text-slate-700">Choose a call type</p>
-                            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                                <button
-                                    type="button"
-                                    onClick={() => void handleStartCall(CALL_TYPE.VOICE)}
-                                    disabled={busy}
-                                    className="rounded-2xl border border-slate-200 p-5 text-left transition hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
-                                >
-                                    <span className="block font-semibold text-slate-950">Voice call</span>
-                                    <span className="mt-1 block text-sm text-slate-500">Connect with audio.</span>
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => void handleStartCall(CALL_TYPE.VIDEO)}
-                                    disabled={busy}
-                                    className="rounded-2xl border border-slate-200 p-5 text-left transition hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
-                                >
-                                    <span className="block font-semibold text-slate-950">Video call</span>
-                                    <span className="mt-1 block text-sm text-slate-500">Use your camera; effects can be selected during the call.</span>
-                                </button>
+                        <motion.div
+                            key="call-type"
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
+                            transition={{ duration: 0.35, ease }}
+                            className="overflow-hidden"
+                        >
+                            <div className="mt-7 border-t border-[#0C1A2E]/10 pt-6">
+                                <p className="text-sm font-semibold text-[#0C1A2E]/75">
+                                    Call {selectedUser.displayName.split(" ")[0]}
+                                </p>
+
+                                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                    <CallTypeButton
+                                        icon={Phone}
+                                        tone="teal"
+                                        title="Voice call"
+                                        text="Connect with audio."
+                                        disabled={busy}
+                                        onClick={() => void handleStartCall(CALL_TYPE.VOICE)}
+                                    />
+                                    <CallTypeButton
+                                        icon={Video}
+                                        tone="blue"
+                                        title="Video call"
+                                        text="Use your camera. Effects can be chosen during the call."
+                                        disabled={busy}
+                                        onClick={() => void handleStartCall(CALL_TYPE.VIDEO)}
+                                    />
+                                </div>
+
+                                {busy && (
+                                    <p
+                                        className="mt-4 flex items-center gap-2 text-sm text-[#0C1A2E]/60"
+                                        role="status"
+                                    >
+                                        <Loader2
+                                            size={16}
+                                            className="animate-spin text-[#0971ED]"
+                                            aria-hidden="true"
+                                        />
+                                        Preparing your call…
+                                    </p>
+                                )}
                             </div>
-                            {busy && <p className="mt-4 text-sm text-slate-500">Preparing your call…</p>}
-                        </div>
+                        </motion.div>
                     )}
-                </section>
-            </div>
-        </main>
+                </AnimatePresence>
+            </Surface>
+        </Page>
+    );
+}
+
+function CallTypeButton({
+    icon,
+    tone,
+    title,
+    text,
+    disabled,
+    onClick,
+}: {
+    icon: React.ComponentProps<typeof IconTile>["icon"];
+    tone: React.ComponentProps<typeof IconTile>["tone"];
+    title: string;
+    text: string;
+    disabled: boolean;
+    onClick: () => void;
+}) {
+    return (
+        <motion.button
+            type="button"
+            onClick={onClick}
+            disabled={disabled}
+            whileHover={disabled ? undefined : { y: -2 }}
+            whileTap={disabled ? undefined : { scale: 0.97 }}
+            className={`flex items-start gap-4 rounded-2xl border border-[#0C1A2E]/10 bg-white/80 p-4 text-left transition-colors hover:border-[#0971ED]/40 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 ${focusRing}`}
+        >
+            <IconTile icon={icon} tone={tone} />
+            <span>
+                <span className="block text-[15px] font-semibold">{title}</span>
+                <span className="mt-1 block text-sm leading-5 text-[#0C1A2E]/55">
+                    {text}
+                </span>
+            </span>
+        </motion.button>
     );
 }

@@ -8,8 +8,7 @@ import { useCallRingtone } from "@/app/hooks/calls/useCallRingtone";
 import { useCallStore } from "@/app/store/calls/call.store";
 import { useAuth } from "@/app/hooks/auth/useAuth";
 import { CALL_TYPE } from "@/app/types/calls/calls.types";
-import { LiveFaceSwapProcessor } from "@/app/lib/video/live-face-swap-processor";
-import { compressReferenceImage } from "@/app/lib/face/face-engine-landmarks";
+import { BrowserFaceSwapProcessor } from "@/app/lib/video/browser-face-swap-processor";
 import { CallControls } from "./call-controls";
 import { motion } from "framer-motion";
 
@@ -137,10 +136,10 @@ export function CallOverlay() {
     const [effectActive, setEffectActive] = useState(false);
     const [effectError, setEffectError] = useState<string | null>(null);
     const [effectBusy, setEffectBusy] = useState(false);
-    const [swapProcessor, setSwapProcessor] = useState<LiveFaceSwapProcessor | null>(null);
+    const [swapProcessor, setSwapProcessor] = useState<BrowserFaceSwapProcessor | null>(null);
     const effectVideoRef = useRef<HTMLVideoElement | null>(null);
     const effectFileRef = useRef<HTMLInputElement | null>(null);
-    const swapProcessorRef = useRef<LiveFaceSwapProcessor | null>(null);
+    const swapProcessorRef = useRef<BrowserFaceSwapProcessor | null>(null);
 
     const isCaller = myParticipant?.role === "caller";
     const enabled = Boolean(
@@ -191,7 +190,7 @@ export function CallOverlay() {
         const refreshMetrics = () => {
             const metrics = swapProcessor.diagnostics;
             if (!metrics.framesRendered) {
-                setEffectNotice("Live face-swap model connected · preparing the first frames…");
+                setEffectNotice("On-device face swap ready · preparing the first frames…");
                 return;
             }
             const fps = Math.round(metrics.processedFps);
@@ -199,7 +198,7 @@ export function CallOverlay() {
             setEffectNotice(
                 fps >= 15
                     ? `Live face swap · ${fps} FPS · ${inference} ms per frame`
-                    : `Live face swap · ${fps} FPS · ${inference} ms per frame. A faster GPU or closer service region is needed for smoother video.`,
+                    : `Live face swap · ${fps} FPS · ${inference} ms per frame. A newer device may provide smoother updates.`,
             );
         };
         refreshMetrics();
@@ -327,7 +326,7 @@ export function CallOverlay() {
             setEffectError("Choose a face photo first.");
             return;
         }
-        if (!effectImageFile || !activeCall?.id || !effectVideoRef.current) {
+        if (!effectImageFile || !activeCall?.id) {
             setEffectError("The photo or active call is no longer available. Try selecting the photo again.");
             return;
         }
@@ -339,19 +338,30 @@ export function CallOverlay() {
         setEffectBusy(true);
         setEffectError(null);
         setEffectNotice(null);
+        let nextProcessor: BrowserFaceSwapProcessor | null = null;
         try {
-            const referenceImage = await compressReferenceImage(effectImageFile);
-            const processor = await LiveFaceSwapProcessor.start(
-                effectVideoRef.current,
-                activeCall.id,
-                referenceImage,
-            );
+            const currentProcessor = swapProcessorRef.current;
+            if (currentProcessor) {
+                await currentProcessor.updateIdentity(effectImageFile);
+                setEffectNotice(`Face updated on your device · ${currentProcessor.runtime.provider}`);
+                return;
+            }
+
+            const cameraTrack = media.localStream?.getVideoTracks()[0];
+            if (!cameraTrack) throw new Error("Turn on your camera before applying a face swap.");
+            nextProcessor = await BrowserFaceSwapProcessor.start(cameraTrack, effectImageFile, ({ model, loaded, total }) => {
+                const percent = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : null;
+                setEffectNotice(
+                    percent === null
+                        ? `Loading ${model} for on-device processing…`
+                        : `Loading ${model} for on-device processing · ${percent}%`,
+                );
+            });
+            const processor = nextProcessor;
             processor.videoTrack.enabled = media.isCameraEnabled;
             await media.replaceVideoTrack(processor.videoTrack);
-            const previous = swapProcessorRef.current;
             swapProcessorRef.current = processor;
             setSwapProcessor(processor);
-            previous?.stop();
             processor.setOnClosed(() => {
                 if (swapProcessorRef.current !== processor) return;
                 swapProcessorRef.current = null;
@@ -359,13 +369,14 @@ export function CallOverlay() {
                 setSwapProcessor(null);
                 setEffectActive(false);
                 setEffectNotice(null);
-                const cameraTrack = media.localStream?.getVideoTracks()[0];
-                if (cameraTrack) void media.replaceVideoTrack(cameraTrack).catch(() => undefined);
-                setEffectError("The private face-swap connection ended. Your call has returned to the camera.");
+                const originalCameraTrack = media.localStream?.getVideoTracks()[0];
+                if (originalCameraTrack) void media.replaceVideoTrack(originalCameraTrack).catch(() => undefined);
+                setEffectError("Face processing stopped. Your call has returned to the camera.");
             });
             setEffectActive(true);
-            setEffectNotice(`Live face swap is connected on ${processor.runtime?.device ?? "the private model service"}.`);
+            setEffectNotice(`Live face swap is running on this device · ${processor.runtime.provider}`);
         } catch (cause) {
+            nextProcessor?.stop();
             const message = cause instanceof Error ? cause.message : "Unable to apply this face effect.";
             setEffectError(message);
         } finally {
@@ -534,16 +545,16 @@ export function CallOverlay() {
                         <div className="mb-5 rounded-2xl border border-white/15 bg-slate-950/90 p-4 shadow-2xl backdrop-blur">
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                 <div className="min-w-0">
-                                    <p className="text-sm font-semibold">Live face effect</p>
+                                    <p className="text-sm font-semibold">Live face swap</p>
                                     <p className="mt-1 text-xs text-white/55">
                                         {effectActive
-                                            ? "The face-swap stream is being sent to the other participant."
+                                            ? "Your transformed video is being sent to the other participant."
                                             : effectImageName
-                                              ? "Ready to connect the private live model. Keep your face in view."
-                                              : "Choose a clear, front-facing photo to use during this call."}
+                                              ? "Ready to load the on-device model. Keep your face in view."
+                                              : "Choose a clear, front-facing photo. Processing stays on your device."}
                                     </p>
                                 </div>
-                                <p className="mb-3 max-w-lg text-[11px] leading-5 text-white/40">Your portrait and reduced-size live video frames are sent through MIYOR’s authenticated API to its private face-swap service. The stream is processed in memory and isn’t saved.</p>
+                                <p className="mb-3 max-w-lg text-[11px] leading-5 text-white/40">Your portrait and camera frames are processed in this browser. Only the resulting video track is sent to the other call participant; MIYOR’s Python service does not receive these frames.</p>
                                 <input
                                     ref={effectFileRef}
                                     type="file"

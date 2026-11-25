@@ -1,247 +1,189 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { ArrowRight, Link2, MessageCircle, Video, X } from "lucide-react";
 
 type WelcomeModalProps = {
     open: boolean;
     onClose: () => void;
 };
 
-export function WelcomeModal({
-    open,
-    onClose,
-}: WelcomeModalProps) {
-    const [visible, setVisible] = useState(false);
+const features = [
+    {
+        icon: Video,
+        tone: "from-[#2BA6FF] to-[#0971ED]",
+        title: "Make calls from anywhere",
+        text: "Start a conversation and invite people with a simple link.",
+    },
+    {
+        icon: Link2,
+        tone: "from-[#8B9CFF] to-[#5B6CF0]",
+        title: "One link. Any conversation.",
+        text: "Share your call wherever your people already connect.",
+    },
+    {
+        icon: MessageCircle,
+        tone: "from-[#4FE0CB] to-[#0E9F8E]",
+        title: "Built for real conversations",
+        text: "Your calls are designed to feel personal, simple, and connected.",
+    },
+];
 
+export function WelcomeModal({ open, onClose }: WelcomeModalProps) {
+    const reduce = useReducedMotion();
+    const ctaRef = useRef<HTMLButtonElement>(null);
+
+    /* Close on Escape, lock page scroll, and focus the primary action */
     useEffect(() => {
-        if (!open) {
-            setVisible(false);
-            return;
-        }
+        if (!open) return;
 
-        const frame = requestAnimationFrame(() => {
-            setVisible(true);
-        });
+        const onKey = (event: KeyboardEvent) => {
+            if (event.key === "Escape") onClose();
+        };
+        const previous = document.body.style.overflow;
+
+        document.body.style.overflow = "hidden";
+        window.addEventListener("keydown", onKey);
+        const focus = window.setTimeout(() => ctaRef.current?.focus(), 250);
 
         return () => {
-            cancelAnimationFrame(frame);
+            document.body.style.overflow = previous;
+            window.removeEventListener("keydown", onKey);
+            window.clearTimeout(focus);
         };
-    }, [open]);
-
-    if (!open) {
-        return null;
-    }
-
-    function handleClose() {
-        setVisible(false);
-
-        window.setTimeout(() => {
-            onClose();
-        }, 180);
-    }
+    }, [open, onClose]);
 
     return (
-        <div
-            className={`fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm transition-opacity duration-200 ${
-                visible ? "opacity-100" : "opacity-0"
-            }`}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="welcome-title"
-        >
-            <div
-                className={`relative w-full max-w-lg overflow-hidden rounded-3xl border border-white/20 bg-white shadow-2xl transition duration-200 ${
-                    visible
-                        ? "translate-y-0 scale-100"
-                        : "translate-y-3 scale-[0.98]"
-                }`}
-            >
-                {/* Decorative background */}
-                <div className="absolute -right-24 -top-24 h-72 w-72 rounded-full bg-indigo-200/50 blur-3xl" />
-
-                <div className="absolute -bottom-28 -left-24 h-72 w-72 rounded-full bg-violet-200/40 blur-3xl" />
-
-                {/* Close button */}
-                <button
-                    type="button"
-                    onClick={handleClose}
-                    aria-label="Close welcome message"
-                    className="absolute right-5 top-5 z-10 flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+        <AnimatePresence>
+            {open && (
+                <div
+                    className="fixed inset-0 z-[70] flex items-end justify-center sm:items-center sm:p-4"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="welcome-title"
                 >
-                    <svg
-                        className="h-5 w-5"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        aria-hidden="true"
+                    {/* Backdrop */}
+                    <motion.div
+                        key="backdrop"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.25 }}
+                        onClick={onClose}
+                        className="absolute inset-0 bg-[#062B5B]/50 backdrop-blur-md"
+                    />
+
+                    {/* Sheet / dialog */}
+                    <motion.div
+                        key="panel"
+                        initial={reduce ? { opacity: 0 } : { opacity: 0, y: 80, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={reduce ? { opacity: 0 } : { opacity: 0, y: 60, scale: 0.98 }}
+                        transition={{ type: "spring", stiffness: 320, damping: 32 }}
+                        className="relative max-h-[92dvh] w-full max-w-lg overflow-y-auto rounded-t-[2rem] border border-white/70 bg-white/85 shadow-[0_40px_100px_-30px_rgba(6,43,91,0.6)] backdrop-blur-2xl sm:rounded-[2rem]"
                     >
-                        <path
-                            d="M6 6l12 12M18 6L6 18"
-                            strokeLinecap="round"
-                        />
-                    </svg>
-                </button>
-
-                <div className="relative px-6 pb-7 pt-8 sm:px-8">
-                    {/* Miyor mark */}
-                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-950 via-indigo-950 to-violet-700 text-xl font-bold text-white shadow-xl shadow-indigo-200">
-                        M
-                    </div>
-
-                    {/* Heading */}
-                    <div className="mt-6">
-                        <span className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-indigo-700">
-                            Welcome to Miyor
-                        </span>
-
-                        <h2
-                            id="welcome-title"
-                            className="mt-4 text-3xl font-bold tracking-tight text-slate-950"
-                        >
-                            Be thee, Anywhere.
-                        </h2>
-
-                        <p className="mt-3 text-base leading-7 text-slate-600">
-                            Your account is ready. Miyor gives you
-                            a simple way to bring people together
-                            from wherever they are.
-                        </p>
-                    </div>
-
-                    {/* Features */}
-                    <div className="mt-7 space-y-3">
-                        {/* Feature 1 */}
-                        <div className="flex items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
-                                <svg
-                                    className="h-5 w-5"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    aria-hidden="true"
-                                >
-                                    <path
-                                        d="M15 10l4.5-2.5v9L15 14"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                    />
-
-                                    <rect
-                                        x="3"
-                                        y="6"
-                                        width="12"
-                                        height="12"
-                                        rx="2"
-                                    />
-                                </svg>
-                            </div>
-
-                            <div>
-                                <p className="text-sm font-semibold text-slate-900">
-                                    Make calls from anywhere
-                                </p>
-
-                                <p className="mt-1 text-xs leading-5 text-slate-500">
-                                    Start a conversation and invite
-                                    people with a simple link.
-                                </p>
-                            </div>
-                        </div>
-
-                        {/* Feature 2 */}
-                        <div className="flex items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
-                                <svg
-                                    className="h-5 w-5"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    aria-hidden="true"
-                                >
-                                    <path
-                                        d="M12 3v18M3 12h18"
-                                        strokeLinecap="round"
-                                    />
-                                </svg>
-                            </div>
-
-                            <div>
-                                <p className="text-sm font-semibold text-slate-900">
-                                    One link. Any conversation.
-                                </p>
-
-                                <p className="mt-1 text-xs leading-5 text-slate-500">
-                                    Share your call wherever your
-                                    people already connect.
-                                </p>
-                            </div>
-                        </div>
-
-                        {/* Feature 3 */}
-                        <div className="flex items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
-                                <svg
-                                    className="h-5 w-5"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    aria-hidden="true"
-                                >
-                                    <path
-                                        d="M20 11.5a8.38 8.38 0 01-1 4.5l2 3-3.5-1.5a8.5 8.5 0 10.5-6"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                    />
-                                </svg>
-                            </div>
-
-                            <div>
-                                <p className="text-sm font-semibold text-slate-900">
-                                    Built for real conversations
-                                </p>
-
-                                <p className="mt-1 text-xs leading-5 text-slate-500">
-                                    Your calls are designed to feel
-                                    personal, simple, and connected.
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* CTA */}
-                    <button
-                        type="button"
-                        onClick={handleClose}
-                        className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-slate-950 via-indigo-950 to-violet-900 px-5 py-3.5 text-sm font-semibold text-white shadow-lg shadow-indigo-200/40 transition hover:-translate-y-0.5 hover:shadow-xl"
-                    >
-                        Let's get started
-
-                        <svg
-                            className="h-4 w-4"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
+                        {/* Ambient colour */}
+                        <div
                             aria-hidden="true"
-                        >
-                            <path
-                                d="M5 12h14"
-                                strokeLinecap="round"
-                            />
+                            className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-[#0971ED]/25 blur-3xl"
+                        />
+                        <div
+                            aria-hidden="true"
+                            className="pointer-events-none absolute -bottom-28 -left-24 h-72 w-72 rounded-full bg-[#2BC6FF]/20 blur-3xl"
+                        />
 
-                            <path
-                                d="m13 6 6 6-6 6"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                            />
-                        </svg>
-                    </button>
+                        {/* Grab handle (mobile) */}
+                        <div className="relative flex justify-center pt-3 sm:hidden" aria-hidden="true">
+                            <span className="h-1.5 w-10 rounded-full bg-[#0C1A2E]/15" />
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            aria-label="Close welcome message"
+                            className="absolute right-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-full text-[#0C1A2E]/50 transition-colors hover:bg-[#0C1A2E]/5 hover:text-[#0C1A2E] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0971ED]"
+                        >
+                            <X size={20} aria-hidden="true" />
+                        </button>
+
+                        <div className="relative px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-6 sm:px-8 sm:pb-8 sm:pt-8">
+                            {/* Miyor mark */}
+                            <motion.div
+                                initial={reduce ? false : { scale: 0.6, rotate: -8 }}
+                                animate={{ scale: 1, rotate: 0 }}
+                                transition={{ type: "spring", stiffness: 260, damping: 16, delay: 0.1 }}
+                                className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-[#2BA6FF] to-[#0971ED] text-2xl font-bold text-white shadow-[0_16px_36px_-10px_rgba(9,113,237,0.7)]"
+                            >
+                                M
+                            </motion.div>
+
+                            <div className="mt-6">
+                                <span className="inline-flex items-center gap-2 rounded-full bg-[#0971ED]/10 px-3 py-1 text-xs font-semibold text-[#0971ED]">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-[#0971ED]" />
+                                    Welcome to Miyor
+                                </span>
+
+                                <h2
+                                    id="welcome-title"
+                                    className="mt-4 font-[family-name:var(--font-display)] text-3xl font-semibold tracking-[-0.03em] sm:text-4xl"
+                                >
+                                    Be there, anywhere.
+                                </h2>
+
+                                <p className="mt-3 text-base leading-7 text-[#0C1A2E]/65">
+                                    Your account is ready. Miyor gives you a simple
+                                    way to bring people together from wherever they
+                                    are.
+                                </p>
+                            </div>
+
+                            <ul className="mt-7 space-y-3">
+                                {features.map((f, i) => {
+                                    const Icon = f.icon;
+
+                                    return (
+                                        <motion.li
+                                            key={f.title}
+                                            initial={reduce ? false : { opacity: 0, y: 14 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            transition={{ delay: 0.2 + i * 0.08, duration: 0.45 }}
+                                            className="flex items-start gap-3.5 rounded-2xl border border-white/80 bg-white/70 p-4"
+                                        >
+                                            <span
+                                                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-white ${f.tone}`}
+                                            >
+                                                <Icon size={20} aria-hidden="true" />
+                                            </span>
+
+                                            <span>
+                                                <strong className="block text-[15px] font-semibold">
+                                                    {f.title}
+                                                </strong>
+                                                <span className="mt-0.5 block text-sm leading-5 text-[#0C1A2E]/60">
+                                                    {f.text}
+                                                </span>
+                                            </span>
+                                        </motion.li>
+                                    );
+                                })}
+                            </ul>
+
+                            <motion.button
+                                ref={ctaRef}
+                                type="button"
+                                onClick={onClose}
+                                whileHover={{ y: -2 }}
+                                whileTap={{ scale: 0.98 }}
+                                className="mt-7 flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-b from-[#2B8CF5] to-[#0971ED] text-base font-semibold text-white shadow-[0_14px_30px_-10px_rgba(9,113,237,0.7),inset_0_1px_0_rgba(255,255,255,0.3)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0971ED]"
+                            >
+                                Let’s get started
+                                <ArrowRight size={20} aria-hidden="true" />
+                            </motion.button>
+                        </div>
+                    </motion.div>
                 </div>
-            </div>
-        </div>
+            )}
+        </AnimatePresence>
     );
 }

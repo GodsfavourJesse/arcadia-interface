@@ -1,0 +1,7 @@
+Browser face-swap workers bundled by MIYOR.
+
+Upstream project: https://github.com/robert-schmidt/browser-inswapper
+Pinned source revision: 25ea3b1d7d93e2fe1629bd1580d3c22496f840ac
+License and notices: apps/web/vendor/browser-inswapper/LICENSE.md and NOTICE.md
+
+The model files are not included here. They have separate terms and are supplied by the deployer.

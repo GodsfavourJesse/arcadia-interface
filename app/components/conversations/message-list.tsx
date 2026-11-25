@@ -7,6 +7,14 @@ import {
     useState,
 } from "react";
 
+import {
+    CheckCheck,
+    ChevronDown,
+    Pencil,
+    Reply,
+    Trash2,
+} from "lucide-react";
+
 import type {
     Message,
 } from "@/app/types/conversations/conversations.types";
@@ -14,19 +22,6 @@ import type {
 type MessageListProps = {
     messages: Message[];
     currentUserId: string;
-
-    /*
-     * Called whenever the user is actually looking
-     * at the newest message — on initial load, when
-     * a new message arrives while they're already at
-     * the bottom, or when they jump back down to it.
-     *
-     * The parent should use this (not "a message
-     * arrived") to decide when to call the mark-as-read
-     * API — marking read on arrival regardless of scroll
-     * position would falsely tell the sender their
-     * message was seen.
-     */
     onReachedNewest?: () => void;
     onReply?: (message: Message) => void;
     onEdit?: (message: Message) => void;
@@ -56,10 +51,14 @@ export function MessageList({
     const onReachedNewestRef =
         useRef(onReachedNewest);
 
-    useEffect(() => {
-        onReachedNewestRef.current =
-            onReachedNewest;
-    }, [onReachedNewest]);
+    const longPressTimerRef =
+        useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const lastPointerTypeRef =
+        useRef<string>("");
+
+    const menuRef =
+        useRef<HTMLDivElement | null>(null);
 
     const [
         isAtNewest,
@@ -71,23 +70,173 @@ export function MessageList({
         setNewMessagesCount,
     ] = useState(0);
 
-    /*
-     * Data contract: `messages` is newest-first
-     * ([newest, ..., oldest]).
-     *
-     * We render the list with `flex-col-reverse`
-     * (see JSX below), which flips that visually:
-     * the newest message ends up at the BOTTOM
-     * and the oldest at the TOP — exactly like
-     * WhatsApp / iMessage.
-     *
-     * Because of that reversal, `scrollTop === 0`
-     * is the *resting* / bottom position (newest
-     * message visible), and scrolling "up" (into
-     * history) increases scrollTop. That means
-     * `scrollTo({ top: 0 })` is genuinely "go to
-     * newest" here — no inversion needed there.
-     */
+    const [
+        activeMessageId,
+        setActiveMessageId,
+    ] = useState<string | null>(null);
+
+    const [
+        openMenuId,
+        setOpenMenuId,
+    ] = useState<string | null>(null);
+
+    useEffect(() => {
+        onReachedNewestRef.current =
+            onReachedNewest;
+    }, [onReachedNewest]);
+
+    /* -------------------------------------------------------------------------- */
+    /*  Message action menu                                                       */
+    /* -------------------------------------------------------------------------- */
+
+    const closeMessageMenu =
+        useCallback(() => {
+            setOpenMenuId(null);
+            setActiveMessageId(null);
+        }, []);
+
+    const toggleMessageMenu =
+        useCallback((messageId: string) => {
+            setActiveMessageId(messageId);
+
+            setOpenMenuId((current) =>
+                current === messageId
+                    ? null
+                    : messageId,
+            );
+        }, []);
+
+    const clearLongPressTimer =
+        useCallback(() => {
+            if (longPressTimerRef.current) {
+                clearTimeout(
+                    longPressTimerRef.current,
+                );
+
+                longPressTimerRef.current = null;
+            }
+        }, []);
+
+    useEffect(() => {
+        function handleOutsideClick(
+            event: PointerEvent,
+        ) {
+            if (
+                menuRef.current &&
+                !menuRef.current.contains(
+                    event.target as Node,
+                )
+            ) {
+                closeMessageMenu();
+            }
+        }
+
+        function handleEscape(
+            event: KeyboardEvent,
+        ) {
+            if (event.key === "Escape") {
+                closeMessageMenu();
+            }
+        }
+
+        document.addEventListener(
+            "pointerdown",
+            handleOutsideClick,
+        );
+
+        document.addEventListener(
+            "keydown",
+            handleEscape,
+        );
+
+        return () => {
+            document.removeEventListener(
+                "pointerdown",
+                handleOutsideClick,
+            );
+
+            document.removeEventListener(
+                "keydown",
+                handleEscape,
+            );
+        };
+    }, [closeMessageMenu]);
+
+    function handlePointerDown(
+        event: React.PointerEvent<HTMLDivElement>,
+        messageId: string,
+    ) {
+        lastPointerTypeRef.current =
+            event.pointerType;
+
+        if (event.pointerType !== "touch") {
+            return;
+        }
+
+        clearLongPressTimer();
+
+        longPressTimerRef.current =
+            setTimeout(() => {
+                setActiveMessageId(messageId);
+                setOpenMenuId(messageId);
+            }, 500);
+    }
+
+    function handlePointerEnd() {
+        clearLongPressTimer();
+    }
+
+    function handleMessageClick(
+        messageId: string,
+    ) {
+        /*
+         * Desktop: clicking the bubble reveals
+         * the dropdown arrow.
+         *
+         * Mobile: normal taps do nothing.
+         * Long-press and double-tap handle mobile.
+         */
+        if (
+            window.matchMedia(
+                "(hover: hover) and (pointer: fine)",
+            ).matches
+        ) {
+            setActiveMessageId((current) =>
+                current === messageId
+                    ? null
+                    : messageId,
+            );
+
+            setOpenMenuId(null);
+        }
+    }
+
+    function handleDoubleClick(
+        messageId: string,
+    ) {
+        setActiveMessageId(messageId);
+        setOpenMenuId(messageId);
+    }
+
+    function handleReply(message: Message) {
+        closeMessageMenu();
+        onReply?.(message);
+    }
+
+    function handleEdit(message: Message) {
+        closeMessageMenu();
+        onEdit?.(message);
+    }
+
+    function handleDelete(message: Message) {
+        closeMessageMenu();
+        onDelete?.(message);
+    }
+
+    /* -------------------------------------------------------------------------- */
+    /*  Scroll behaviour                                                          */
+    /* -------------------------------------------------------------------------- */
+
     const scrollToNewest =
         useCallback(
             (
@@ -105,8 +254,7 @@ export function MessageList({
                     behavior,
                 });
 
-                isAtNewestRef.current =
-                    true;
+                isAtNewestRef.current = true;
 
                 setIsAtNewest(true);
                 setNewMessagesCount(0);
@@ -116,10 +264,8 @@ export function MessageList({
             [],
         );
 
-    /*
-     * Initial load: start pinned at the newest
-     * message (the bottom, visually).
-     */
+    /* Initial positioning */
+
     useEffect(() => {
         const container =
             scrollContainerRef.current;
@@ -132,8 +278,7 @@ export function MessageList({
         }
 
         if (!hasInitializedRef.current) {
-            hasInitializedRef.current =
-                true;
+            hasInitializedRef.current = true;
 
             previousMessageCountRef.current =
                 messages.length;
@@ -148,8 +293,7 @@ export function MessageList({
 
                 currentContainer.scrollTop = 0;
 
-                isAtNewestRef.current =
-                    true;
+                isAtNewestRef.current = true;
 
                 setIsAtNewest(true);
 
@@ -158,18 +302,8 @@ export function MessageList({
         }
     }, [messages.length]);
 
-    /*
-     * Handle newly added messages.
-     *
-     * A brand-new message is prepended to the
-     * `messages` array (index 0), which — thanks
-     * to `flex-col-reverse` — lands at the visual
-     * BOTTOM, below whatever the user is currently
-     * looking at. That means it never shifts
-     * content the user is already viewing, so no
-     * scroll-position compensation is needed here
-     * (unlike a normal top-insertion list).
-     */
+    /* Newly added messages */
+
     useEffect(() => {
         const container =
             scrollContainerRef.current;
@@ -186,8 +320,7 @@ export function MessageList({
 
         const addedMessageCount =
             Math.max(
-                currentCount -
-                    previousCount,
+                currentCount - previousCount,
                 0,
             );
 
@@ -206,11 +339,6 @@ export function MessageList({
                 return;
             }
 
-            /*
-             * User is viewing the newest messages
-             * (at the bottom) — keep them pinned
-             * there as new ones arrive.
-             */
             if (isAtNewestRef.current) {
                 currentContainer.scrollTo({
                     top: 0,
@@ -224,25 +352,15 @@ export function MessageList({
                 return;
             }
 
-            /*
-             * User has scrolled up into history.
-             * New messages arrived below their
-             * current view — just surface a
-             * counter/pill, don't yank their
-             * scroll position.
-             */
             setNewMessagesCount(
                 (current) =>
-                    current +
-                    addedMessageCount,
+                    current + addedMessageCount,
             );
         });
     }, [messages.length]);
 
-    /*
-     * Track whether the user is currently at the
-     * newest message (the bottom of the view).
-     */
+    /* Track newest-message visibility */
+
     useEffect(() => {
         const container =
             scrollContainerRef.current;
@@ -263,22 +381,15 @@ export function MessageList({
                 isAtNewestRef.current;
 
             const atNewest =
-                currentContainer.scrollTop <=
-                40;
+                currentContainer.scrollTop <= 40;
 
-            isAtNewestRef.current =
-                atNewest;
+            isAtNewestRef.current = atNewest;
 
             setIsAtNewest(atNewest);
 
             if (atNewest) {
                 setNewMessagesCount(0);
 
-                /*
-                 * Only fire on the transition into
-                 * "at newest" — not on every scroll
-                 * tick while resting there.
-                 */
                 if (!wasAtNewest) {
                     onReachedNewestRef.current?.();
                 }
@@ -290,9 +401,7 @@ export function MessageList({
         container.addEventListener(
             "scroll",
             handleScroll,
-            {
-                passive: true,
-            },
+            { passive: true },
         );
 
         return () => {
@@ -302,6 +411,10 @@ export function MessageList({
             );
         };
     }, []);
+
+    /* -------------------------------------------------------------------------- */
+    /*  Empty state                                                               */
+    /* -------------------------------------------------------------------------- */
 
     if (messages.length === 0) {
         return (
@@ -319,43 +432,131 @@ export function MessageList({
         );
     }
 
+    /* -------------------------------------------------------------------------- */
+    /*  Message list                                                              */
+    /* -------------------------------------------------------------------------- */
+
     return (
         <div className="relative min-h-0 flex-1">
             <div
                 ref={scrollContainerRef}
                 className="flex h-full flex-col-reverse gap-3 overflow-y-auto p-5"
             >
-                {messages.map(
-                    (message) => {
-                        const isOwn =
-                            message.senderId ===
-                            currentUserId;
+                {messages.map((message) => {
+                    const isOwn =
+                        message.senderId === currentUserId;
 
-                        return (
+                    const isDeleted =
+                        Boolean(message.deletedAt);
+
+                    const isActive =
+                        activeMessageId === message.id;
+
+                    const isMenuOpen =
+                        openMenuId === message.id;
+
+                    const repliedMessage =
+                        messages.find(
+                            (item) =>
+                                item.id ===
+                                message.replyToMessageId,
+                        );
+
+                    return (
+                        <div
+                            key={message.id}
+                            className={`flex ${
+                                isOwn
+                                    ? "justify-end"
+                                    : "justify-start"
+                            }`}
+                        >
                             <div
-                                key={
-                                    message.id
-                                }
-                                className={`flex ${
-                                    isOwn
-                                        ? "justify-end"
-                                        : "justify-start"
+                                className={`group relative max-w-[85%] sm:max-w-[75%] ${
+                                    isMenuOpen
+                                        ? "z-30"
+                                        : "z-0"
                                 }`}
+                                ref={
+                                    isMenuOpen
+                                        ? menuRef
+                                        : undefined
+                                }
                             >
+                                {/* Message bubble */}
+
                                 <div
-                                    className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${
+                                    onPointerDown={(event) =>
+                                        handlePointerDown(
+                                            event,
+                                            message.id,
+                                        )
+                                    }
+                                    onPointerUp={handlePointerEnd}
+                                    onPointerLeave={handlePointerEnd}
+                                    onPointerCancel={handlePointerEnd}
+                                    onClick={() =>
+                                        handleMessageClick(
+                                            message.id,
+                                        )
+                                    }
+                                    onDoubleClick={() =>
+                                        handleDoubleClick(
+                                            message.id,
+                                        )
+                                    }
+                                    onContextMenu={(event) => {
+                                        event.preventDefault();
+
+                                        setActiveMessageId(
+                                            message.id,
+                                        );
+
+                                        setOpenMenuId(
+                                            message.id,
+                                        );
+                                    }}
+                                    className={`relative cursor-pointer select-text rounded-2xl px-4 py-2.5 ${
                                         isOwn
                                             ? "rounded-br-md bg-[#0971ED] text-white"
                                             : "rounded-bl-md bg-slate-100 text-slate-900"
                                     }`}
                                 >
-                                    {message.replyToMessageId && messages.find((item) => item.id === message.replyToMessageId) && <p className="mb-2 rounded-lg border-l-2 border-[#2BC6FF] bg-black/5 px-2.5 py-1.5 text-xs opacity-80">Replying to: {messages.find((item) => item.id === message.replyToMessageId)?.body}</p>}
-                                    <p className="whitespace-pre-wrap break-words text-sm">{message.deletedAt ? "Message deleted" : message.body}</p>
+                                    {/* Reply preview */}
+
+                                    {message.replyToMessageId &&
+                                        repliedMessage && (
+                                            <div
+                                                className={`mb-2 rounded-lg border-l-2 border-[#2BC6FF] px-2.5 py-1.5 text-xs ${
+                                                    isOwn
+                                                        ? "bg-white/10"
+                                                        : "bg-black/5"
+                                                }`}
+                                            >
+                                                <p className="mb-0.5 font-semibold opacity-80">
+                                                    Replying to
+                                                </p>
+
+                                                <p className="line-clamp-2 opacity-75">
+                                                    {repliedMessage.body}
+                                                </p>
+                                            </div>
+                                        )}
+
+                                    {/* Message body */}
+
+                                    <p className="whitespace-pre-wrap break-words text-sm">
+                                        {isDeleted
+                                            ? "Message deleted"
+                                            : message.body}
+                                    </p>
+
+                                    {/* Time and read receipt */}
 
                                     <div
                                         className={`mt-1 flex items-center justify-end gap-1.5 text-[11px] ${
                                             isOwn
-                                                ? "text-slate-300"
+                                                ? "text-white/65"
                                                 : "text-slate-400"
                                         }`}
                                     >
@@ -371,55 +572,144 @@ export function MessageList({
                                             )}
                                         </time>
 
-                                        {isOwn && (
-                                            <span>
-                                                {message.readAt
-                                                    ? "Read"
-                                                    : "Sent"}
-                                            </span>
+                                        {isOwn && !isDeleted && (
+                                            <CheckCheck
+                                                size={16}
+                                                strokeWidth={2.4}
+                                                aria-label={
+                                                    message.readAt
+                                                        ? "Seen"
+                                                        : "Sent"
+                                                }
+                                                className={
+                                                    message.readAt
+                                                        ? "text-[#75D5FF]"
+                                                        : "text-white/55"
+                                                }
+                                            />
                                         )}
                                     </div>
-                                    {!message.deletedAt && <div className={`mt-2 flex gap-3 text-[11px] ${isOwn ? "text-white/65" : "text-slate-500"}`}>
-                                        <button type="button" onClick={() => onReply?.(message)} className="hover:underline">Reply</button>
-                                        {isOwn && <button type="button" onClick={() => onEdit?.(message)} className="hover:underline">Edit</button>}
-                                        {isOwn && <button type="button" onClick={() => onDelete?.(message)} className="hover:underline">Delete</button>}
-                                    </div>}
+
+                                    {/* Desktop dropdown trigger */}
+
+                                    {!isDeleted && isActive && (
+                                        <button
+                                            type="button"
+                                            aria-label="Message actions"
+                                            aria-expanded={isMenuOpen}
+                                            onPointerDown={(event) =>
+                                                event.stopPropagation()
+                                            }
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+
+                                                toggleMessageMenu(
+                                                    message.id,
+                                                );
+                                            }}
+                                            className={`absolute -top-3 ${
+                                                isOwn
+                                                    ? "-left-3"
+                                                    : "-right-3"
+                                            } flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-md transition hover:bg-slate-50`}
+                                        >
+                                            <ChevronDown size={15} />
+                                        </button>
+                                    )}
                                 </div>
+
+                                {/* Message actions dropdown */}
+
+                                {!isDeleted && isMenuOpen && (
+                                    <div
+                                        className={`absolute top-full z-50 mt-2 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white py-1.5 shadow-xl ${
+                                            isOwn
+                                                ? "right-0"
+                                                : "left-0"
+                                        }`}
+                                        onPointerDown={(event) =>
+                                            event.stopPropagation()
+                                        }
+                                    >
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                handleReply(message)
+                                            }
+                                            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                                        >
+                                            <Reply
+                                                size={16}
+                                                className="text-slate-500"
+                                            />
+
+                                            Reply
+                                        </button>
+
+                                        {isOwn && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        handleEdit(message)
+                                                    }
+                                                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                                                >
+                                                    <Pencil
+                                                        size={16}
+                                                        className="text-slate-500"
+                                                    />
+
+                                                    Edit
+                                                </button>
+
+                                                <div className="mx-3 my-1 border-t border-slate-100" />
+
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        handleDelete(message)
+                                                    }
+                                                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-red-600 transition hover:bg-red-50"
+                                                >
+                                                    <Trash2 size={16} />
+
+                                                    Delete
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                )}
                             </div>
-                        );
-                    },
-                )}
+                        </div>
+                    );
+                })}
             </div>
 
-            {/* New-messages pill + jump button, both bottom-anchored now */}
-            {!isAtNewest &&
-                newMessagesCount > 0 && (
-                    <button
-                        type="button"
-                        onClick={() =>
-                            scrollToNewest(
-                                "smooth",
-                            )
-                        }
-                        className="absolute bottom-16 left-1/2 z-10 -translate-x-1/2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-lg transition hover:bg-slate-50"
-                    >
-                        ↓{" "}
-                        {newMessagesCount}{" "}
-                        new{" "}
-                        {newMessagesCount ===
-                        1
-                            ? "message"
-                            : "messages"}
-                    </button>
-                )}
+            {/* New messages pill */}
+
+            {!isAtNewest && newMessagesCount > 0 && (
+                <button
+                    type="button"
+                    onClick={() =>
+                        scrollToNewest("smooth")
+                    }
+                    className="absolute bottom-16 left-1/2 z-10 -translate-x-1/2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-lg transition hover:bg-slate-50"
+                >
+                    ↓ {newMessagesCount} new{" "}
+                    {newMessagesCount === 1
+                        ? "message"
+                        : "messages"}
+                </button>
+            )}
+
+            {/* Jump to newest */}
 
             {!isAtNewest && (
                 <button
                     type="button"
                     onClick={() =>
-                        scrollToNewest(
-                            "smooth",
-                        )
+                        scrollToNewest("smooth")
                     }
                     aria-label="Go to newest messages"
                     className="absolute bottom-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-lg text-slate-700 shadow-lg transition hover:bg-slate-50"

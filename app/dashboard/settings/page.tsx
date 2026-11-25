@@ -3,20 +3,43 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { motion } from "framer-motion";
+import {
+    ChevronRight,
+    FileText,
+    LogOut,
+    Moon,
+    ShieldCheck,
+    Sparkles,
+    Sun,
+} from "lucide-react";
+import { toast } from "sonner";
 import { useAuth } from "@/app/hooks/auth/useAuth";
 import { ProfileSettingsForm } from "@/app/components/auth/ProfileSettingsForm";
 import { PushNotificationSettings } from "@/app/components/pwa/push-notification-settings";
 import { useTheme } from "@/app/providers/theme-provider";
-import { toast } from "sonner";
+import {
+    Avatar,
+    IconTile,
+    Page,
+    PageHeader,
+    Skeleton,
+    StaggerItem,
+    StaggerList,
+    Surface,
+    focusRing,
+} from "@/app/components/dashboard/dashboard-ui";
+
+const policies = [
+    { label: "Terms of use", text: "Expectations for using Miyor", href: "/terms", icon: FileText },
+    { label: "Privacy policy", text: "How your information is used", href: "/privacy", icon: ShieldCheck },
+    { label: "Services", text: "What Miyor offers", href: "/services", icon: Sparkles },
+];
 
 export default function SettingsPage() {
     const router = useRouter();
 
-    const {
-        user,
-        isHydrated,
-        isLoading,
-    } = useAuth();
+    const { user, isHydrated, isLoading, logout } = useAuth();
     const { theme, setTheme } = useTheme();
 
     useEffect(() => {
@@ -27,11 +50,11 @@ export default function SettingsPage() {
 
     if (!isHydrated || isLoading) {
         return (
-            <main className="flex min-h-screen items-center justify-center">
-                <p className="text-sm text-muted-foreground">
-                    Loading your account...
-                </p>
-            </main>
+            <Page width="max-w-3xl">
+                <Skeleton className="h-10 w-40" />
+                <Skeleton className="mt-6 h-32 w-full rounded-3xl" />
+                <Skeleton className="mt-5 h-96 w-full rounded-3xl" />
+            </Page>
         );
     }
 
@@ -40,40 +63,149 @@ export default function SettingsPage() {
     }
 
     return (
-        <main className="min-h-screen">
-            <div className="mx-auto w-full max-w-2xl px-6 py-8">
-                <div className="mb-8">
-                    <button
-                        type="button"
-                        onClick={() =>
-                            router.push("/dashboard")
-                        }
-                        className="text-sm font-medium underline"
-                    >
-                        ← Back to dashboard
-                    </button>
+        <Page width="max-w-3xl">
+            <PageHeader
+                title="Settings"
+                subtitle="Personalize your workspace, manage your profile and choose how Miyor reaches you."
+            />
 
-                    <h1 className="mt-6 text-3xl font-semibold">
-                        Settings
-                    </h1>
-
-                    <p className="mt-2 text-sm text-muted-foreground">
-                        Personalize your workspace, manage your profile and choose how Miyor reaches you.
-                    </p>
-                </div>
-
-                <div className="space-y-5">
-                    <section className="rounded-2xl border border-[var(--miyor-border)] bg-white p-5 shadow-sm">
-                        <div className="mb-4"><h2 className="font-semibold text-slate-900">Appearance</h2><p className="mt-1 text-sm text-slate-500">Choose the look that feels right on every device.</p></div>
-                        <div className="grid grid-cols-2 gap-3">
-                            {(["light", "dark"] as const).map((option) => <button key={option} type="button" aria-pressed={theme === option} onClick={() => { setTheme(option); toast.success(`${option === "dark" ? "Dark" : "Light"} appearance enabled`); }} className={`flex items-center gap-3 rounded-xl border p-4 text-left capitalize transition ${theme === option ? "border-[#0971ED] bg-blue-50 text-[#0971ED] ring-2 ring-blue-100" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}><span className={`flex h-9 w-9 items-center justify-center rounded-lg ${option === "dark" ? "bg-slate-900 text-white" : "bg-amber-50 text-amber-600"}`}>{option === "dark" ? "◐" : "☼"}</span><span><strong className="block text-sm">{option}</strong><small className="text-xs opacity-70">{option === "dark" ? "Low-light workspace" : "Bright and clear"}</small></span></button>)}
+            <StaggerList className="space-y-5">
+                {/* Account summary */}
+                <StaggerItem>
+                    <Surface className="flex items-center gap-4 p-4 sm:p-5">
+                        <Avatar
+                            name={user.displayName}
+                            src={user.profilePictureUrl}
+                            size={64}
+                        />
+                        <div className="min-w-0">
+                            <p className="truncate font-[family-name:var(--font-display)] text-xl font-semibold tracking-tight">
+                                {user.displayName}
+                            </p>
+                            <p className="truncate text-sm text-[#0C1A2E]/55">
+                                @{user.username}
+                            </p>
                         </div>
-                    </section>
+                    </Surface>
+                </StaggerItem>
+
+                {/* Appearance */}
+                <StaggerItem>
+                    <Surface className="p-5 sm:p-6">
+                        <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight">
+                            Appearance
+                        </h2>
+                        <p className="mt-1 text-sm text-[#0C1A2E]/55">
+                            Choose the look that feels right on every device.
+                        </p>
+
+                        <div
+                            role="radiogroup"
+                            aria-label="Appearance"
+                            className="relative mt-5 grid grid-cols-2 gap-1 rounded-2xl bg-[#0C1A2E]/[0.06] p-1"
+                        >
+                            {(["light", "dark"] as const).map((option) => {
+                                const active = theme === option;
+                                const Icon = option === "dark" ? Moon : Sun;
+
+                                return (
+                                    <button
+                                        key={option}
+                                        type="button"
+                                        role="radio"
+                                        aria-checked={active}
+                                        onClick={() => {
+                                            setTheme(option);
+                                            toast.success(
+                                                `${option === "dark" ? "Dark" : "Light"} appearance enabled`,
+                                            );
+                                        }}
+                                        className={`relative flex h-12 items-center justify-center gap-2 rounded-xl text-sm font-semibold capitalize transition-colors ${
+                                            active ? "text-[#0971ED]" : "text-[#0C1A2E]/55"
+                                        } ${focusRing}`}
+                                    >
+                                        {active && (
+                                            <motion.span
+                                                layoutId="theme-pill"
+                                                transition={{ type: "spring", stiffness: 420, damping: 34 }}
+                                                className="absolute inset-0 rounded-xl bg-white shadow-sm"
+                                            />
+                                        )}
+                                        <Icon size={18} className="relative" aria-hidden="true" />
+                                        <span className="relative">{option}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </Surface>
+                </StaggerItem>
+
+                {/* Profile */}
+                <StaggerItem>
                     <ProfileSettingsForm />
+                </StaggerItem>
+
+                {/* Notifications */}
+                <StaggerItem>
                     <PushNotificationSettings />
-                    <section className="rounded-2xl border border-[var(--miyor-border)] bg-white p-5 shadow-sm"><h2 className="font-semibold text-slate-900">Trust and policies</h2><p className="mt-1 text-sm text-slate-500">Read how Miyor protects your account and sets expectations for using the service.</p><div className="mt-4 flex flex-wrap gap-2">{[["Terms of use", "/terms"], ["Privacy policy", "/privacy"], ["Services", "/services"]].map(([label, href]) => <Link key={href} href={href} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:border-[#0971ED] hover:text-[#0971ED]">{label}</Link>)}</div></section>
-                </div>
-            </div>
-        </main>
+                </StaggerItem>
+
+                {/* Policies */}
+                <StaggerItem>
+                    <Surface className="overflow-hidden">
+                        <div className="px-5 pb-2 pt-5 sm:px-6">
+                            <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight">
+                                Trust and policies
+                            </h2>
+                            <p className="mt-1 text-sm text-[#0C1A2E]/55">
+                                Read how Miyor protects your account and sets expectations for using the service.
+                            </p>
+                        </div>
+
+                        <ul className="p-2">
+                            {policies.map((p) => (
+                                <li key={p.href}>
+                                    <Link
+                                        href={p.href}
+                                        className={`flex items-center gap-3 rounded-2xl px-3 py-3 transition-colors hover:bg-[#0971ED]/[0.06] ${focusRing}`}
+                                    >
+                                        <IconTile icon={p.icon} tone="blue" size="sm" />
+                                        <span className="min-w-0 flex-1">
+                                            <strong className="block text-[15px] font-semibold">
+                                                {p.label}
+                                            </strong>
+                                            <span className="block text-xs text-[#0C1A2E]/55">
+                                                {p.text}
+                                            </span>
+                                        </span>
+                                        <ChevronRight
+                                            size={18}
+                                            className="shrink-0 text-[#0C1A2E]/35"
+                                            aria-hidden="true"
+                                        />
+                                    </Link>
+                                </li>
+                            ))}
+                        </ul>
+                    </Surface>
+                </StaggerItem>
+
+                {/* Sign out */}
+                <StaggerItem>
+                    <motion.button
+                        type="button"
+                        whileTap={{ scale: 0.98 }}
+                        onClick={async () => {
+                            await logout();
+                            router.replace("/login");
+                        }}
+                        className={`flex h-14 w-full items-center justify-center gap-2 rounded-2xl border border-red-200/80 bg-white/70 text-[15px] font-semibold text-red-600 backdrop-blur-xl transition-colors hover:bg-red-50 ${focusRing}`}
+                    >
+                        <LogOut size={19} aria-hidden="true" />
+                        Sign out of Miyor
+                    </motion.button>
+                </StaggerItem>
+            </StaggerList>
+        </Page>
     );
 }
